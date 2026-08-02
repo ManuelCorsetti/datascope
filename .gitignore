@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# generated reports / local test artifacts
+example_report.html
+sample/
+
+.DS_Store
