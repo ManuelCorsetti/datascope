@@ -9,7 +9,13 @@ enhancement — falls back to system fonts if it can't load).
 ## Install
 
 ```
-pip install -r requirements.txt
+pip install -e .
+```
+
+`.xlsx`/`.xls` input requires the optional `excel` extra:
+
+```
+pip install -e ".[excel]"
 ```
 
 ## Usage
@@ -71,6 +77,9 @@ python example.py
 - Exact duplicate-row detection
 - Primary-key candidate detection (single column, and a bounded search
   over identifier-like columns for composite keys)
+- Functional dependency detection (does column A determine column B, e.g.
+  `zip -> state`? — a bounded, evidence-weighted search flags near- and
+  exact dependencies, with counter-example rows for anything short of 100%)
 - An alerts panel surfacing all of the above at a glance
 
 ## Notes / assumptions
@@ -90,13 +99,22 @@ python example.py
 ## Files
 
 ```
-datascope/
+src/datascope/
   core.py          DataProfiler class, orchestration, correlations, PK search
   stats.py         numeric/string/datetime/boolean stat + histogram calculators
   semantic.py      semantic type inference
   pii.py           PII/PHI/PCI detection + value masking
   quality.py       quality-rule + dbt-snippet recommendations, quality score
+  relationships.py functional dependency detection (column A -> column B)
   html_report.py   renders the profile dict to the HTML dashboard
   cli.py / __main__.py   `python -m datascope`
-example.py         synthetic messy dataset + runnable demo
+tests/              pytest suite
+example.py          synthetic messy dataset + runnable demo
+```
+
+## Development
+
+```
+pip install -e ".[dev]"
+pytest
 ```

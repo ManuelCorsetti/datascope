@@ -79,6 +79,13 @@ CONTENT_PATTERNS: Dict[str, Tuple[re.Pattern, str]] = {
 CONTENT_MATCH_THRESHOLD = 0.6
 NAME_WEIGHT = 0.55
 CONTENT_WEIGHT = 0.5
+# A passed checksum (currently: Luhn for credit cards) is real corroborating
+# evidence a bare shape-regex match doesn't have -- e.g. a pure 16-digit
+# string satisfies both the credit_card AND phone patterns (phone's char
+# class permits unbroken digit runs too), so without this bonus a category
+# with no validation at all could win the tie purely on dict iteration
+# order, which is exactly backwards.
+CHECKSUM_VALIDATED_BONUS = 0.05
 
 
 def _luhn_valid(number_str: str) -> bool:
@@ -107,7 +114,7 @@ def _match_name(col_name: str) -> List[Tuple[str, str]]:
     return matches
 
 
-def _match_content(series: pd.Series, sample_size: int, random_state: int) -> List[Tuple[str, str, float]]:
+def _match_content(series: pd.Series, sample_size: int, random_state: int) -> List[Tuple[str, str, float, bool]]:
     non_null = series.dropna().astype(str).str.strip()
     non_null = non_null[non_null != ""]
     if non_null.empty:
@@ -120,12 +127,14 @@ def _match_content(series: pd.Series, sample_size: int, random_state: int) -> Li
         rate = float(matched.mean())
         if rate < CONTENT_MATCH_THRESHOLD:
             continue
+        validated = False
         if category == "credit_card":
             candidates = sample[matched]
             luhn_rate = float(candidates.apply(_luhn_valid).mean()) if len(candidates) else 0.0
             if luhn_rate < 0.5:
                 continue  # digit-shaped but fails checksum -> probably just another ID, not a card
-        results.append((category, group, round(rate, 3)))
+            validated = True
+        results.append((category, group, round(rate, 3), validated))
     return results
 
 
@@ -146,9 +155,9 @@ def detect_sensitive_data(series: pd.Series, col_name: str, sample_size: int = 1
         entry["score"] += NAME_WEIGHT
         entry["by"].add("column_name")
 
-    for category, group, rate in content_matches:
+    for category, group, rate, validated in content_matches:
         entry = scores.setdefault(category, {"group": group, "score": 0.0, "by": set()})
-        entry["score"] += CONTENT_WEIGHT * rate
+        entry["score"] += CONTENT_WEIGHT * rate + (CHECKSUM_VALIDATED_BONUS if validated else 0.0)
         entry["by"].add("content_pattern")
 
     best_key = max(scores, key=lambda k: scores[k]["score"])
