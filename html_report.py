@@ -184,6 +184,15 @@ table.heatmap th { padding: 4px 6px; }
 .pk-row { display: flex; gap: 10px; align-items: center; padding: 6px 0; font-size: 13px; }
 .pk-type { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--teal); background: var(--teal-soft); padding: 2px 7px; border-radius: 4px; }
 .pk-cols { font-family: var(--font-mono); color: var(--text); }
+.fd-row { display: flex; gap: 10px; align-items: center; padding: 7px 0; font-size: 13px; border-top: 1px solid var(--border); }
+.fd-row:first-child { border-top: none; }
+.fd-expr { font-family: var(--font-mono); color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fd-expr b { color: var(--text); font-weight: 600; }
+.fd-arrow { color: var(--text-muted); }
+.fd-purity { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.fd-purity-exact { color: var(--teal); background: var(--teal-soft); }
+.fd-purity-partial { color: var(--amber); background: var(--amber-soft); }
+.fd-support { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
 
 .columns-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .columns-title { font-family: var(--font-mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-muted); font-weight: 600; }
@@ -337,6 +346,11 @@ table.heatmap th { padding: 4px 6px; }
   <section class="panel" id="pk-panel" style="display:none">
     <div class="panel-title"><span class="material-symbols-outlined icon">key</span>Primary-key candidates</div>
     <div id="pk-list"></div>
+  </section>
+
+  <section class="panel" id="fd-panel" style="display:none">
+    <div class="panel-title"><span class="material-symbols-outlined icon">account_tree</span>Column relationships <span class="panel-sub">functional dependencies</span></div>
+    <div id="fd-list"></div>
   </section>
 
   <section class="columns-section">
@@ -602,6 +616,27 @@ function renderPkCandidates() {
   list.innerHTML = candidates.map(c => '<div class="pk-row"><span class="pk-type">' + (c.type === 'single' ? 'Single column' : 'Composite') + '</span><span class="pk-cols">' + c.columns.map(esc).join(' + ') + '</span></div>').join('');
 }
 
+function renderFunctionalDependencies() {
+  const panel = document.getElementById('fd-panel');
+  const list = document.getElementById('fd-list');
+  const fds = PROFILE.functional_dependencies || [];
+  if (!fds.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  list.innerHTML = fds.map(fd => {
+    const exact = fd.purity >= 0.999999;
+    const purityLabel = exact ? 'always' : (fd.purity * 100).toFixed(1) + '%';
+    const tip = exact
+      ? esc(fd.determinant) + ' determines ' + esc(fd.dependent) + ' with no exceptions across ' + fd.support_rows + ' row(s).'
+      : esc(fd.determinant) + ' determines ' + esc(fd.dependent) + ' in ' + purityLabel + ' of ' + fd.support_rows + ' row(s) — ' + fd.violation_count + ' exception(s).';
+    return '<div class="fd-row">' +
+      '<span class="fd-expr" data-tip="' + tip + '"><b>' + esc(fd.determinant) + '</b> <span class="fd-arrow">→</span> <b>' + esc(fd.dependent) + '</b></span>' +
+      '<span class="fd-support">' + fd.distinct_determinant_values + ' value(s)</span>' +
+      '<span class="fd-purity ' + (exact ? 'fd-purity-exact' : 'fd-purity-partial') + '">' + purityLabel + '</span>' +
+    '</div>';
+  }).join('');
+  wireTooltips(list);
+}
+
 const state = { search: '', sensitiveOnly: false, typeFilters: new Set(), sort: 'name' };
 
 function renderFilterChips() {
@@ -783,6 +818,7 @@ renderTypeDistribution();
 renderCorrelation();
 renderMissingCorr();
 renderPkCandidates();
+renderFunctionalDependencies();
 renderFilterChips();
 renderColumnGrid();
 </script>

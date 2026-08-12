@@ -19,6 +19,7 @@ from .stats import (
 from .semantic import infer_semantic_type
 from .pii import detect_sensitive_data, mask_value
 from .quality import recommend_rules, generate_dbt_snippet, compute_quality_score
+from .relationships import find_functional_dependencies
 from .html_report import render_html
 
 DATETIME_TYPES = ("datetime", "datetime_string")
@@ -34,6 +35,8 @@ class DataProfiler:
         max_pk_candidate_pool: int = 10,
         max_correlation_cols: int = 30,
         random_state: int = 42,
+        fd_min_purity: float = 0.98,
+        max_fd_candidate_pool: int = 25,
     ):
         self.sample_size_for_content_checks = sample_size_for_content_checks
         self.histogram_bins = histogram_bins
@@ -42,6 +45,8 @@ class DataProfiler:
         self.max_pk_candidate_pool = max_pk_candidate_pool
         self.max_correlation_cols = max_correlation_cols
         self.random_state = random_state
+        self.fd_min_purity = fd_min_purity
+        self.max_fd_candidate_pool = max_fd_candidate_pool
 
     # ---------------------------------------------------------------- load
     def _load(self, data: Union[pd.DataFrame, str]) -> pd.DataFrame:
@@ -89,6 +94,9 @@ class DataProfiler:
         pk_candidates = self._find_pk_candidates(df, column_profiles)
         high_correlation_pairs = self._high_correlation_pairs(correlations)
         duplicate_columns = self._find_duplicate_columns(df)
+        functional_dependencies = find_functional_dependencies(
+            df, column_profiles, min_purity=self.fd_min_purity, max_candidate_pool=self.max_fd_candidate_pool,
+        )
 
         meta = {
             "source_name": str(source_name),
@@ -116,9 +124,11 @@ class DataProfiler:
             "pk_candidates": pk_candidates,
             "high_correlation_pairs": high_correlation_pairs,
             "duplicate_columns": duplicate_columns,
+            "functional_dependencies": functional_dependencies,
         }
         result["overview"]["alerts"] = self._build_alerts(column_profiles, duplicate_rows, n_rows,
-                                                            high_correlation_pairs, duplicate_columns)
+                                                            high_correlation_pairs, duplicate_columns,
+                                                            functional_dependencies)
         result["overview"]["quality_score"] = compute_quality_score(result)
         return result
 
@@ -169,7 +179,15 @@ class DataProfiler:
 
         sensitive = detect_sensitive_data(
             series, col, sample_size=self.sample_size_for_content_checks, random_state=self.random_state,
+            # continuous_numeric measures (price, temperature, ...) are
+            # skipped too: their str() form is a decimal expansion that
+            # incidentally satisfies digit-plus-separator content regexes
+            # (e.g. the phone pattern) purely by coincidence, not because
+            # the values mean anything like a phone/SSN/card number.
+            # Identifier / discrete_numeric_categorical columns (where a
+            # numeric SSN or card number would actually land) still run.
             skip_content=(semantic_type in DATETIME_TYPES or semantic_type == "boolean"
+                          or semantic_type == "continuous_numeric"
                           or pd.api.types.is_datetime64_any_dtype(series)),
         )
         profile["sensitive"] = sensitive
@@ -259,7 +277,8 @@ class DataProfiler:
 
     def _build_alerts(self, column_profiles: List[Dict[str, Any]], duplicate_rows: int, n_rows: int,
                        high_correlation_pairs: Optional[List[Dict[str, Any]]] = None,
-                       duplicate_columns: Optional[List[List[str]]] = None) -> List[Dict[str, Any]]:
+                       duplicate_columns: Optional[List[List[str]]] = None,
+                       functional_dependencies: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         alerts: List[Dict[str, Any]] = []
         if duplicate_rows > 0:
             alerts.append({
@@ -272,6 +291,16 @@ class DataProfiler:
         for pair in (high_correlation_pairs or [])[:8]:
             alerts.append({"severity": "info", "column": None,
                             "message": f"'{pair['col1']}' and '{pair['col2']}' are highly correlated (r={pair['correlation']})."})
+        for fd in (functional_dependencies or [])[:8]:
+            if fd["purity"] >= 0.999999:
+                alerts.append({"severity": "info", "column": None,
+                                "message": f"'{fd['determinant']}' fully determines '{fd['dependent']}' "
+                                           f"({fd['distinct_determinant_values']} values, no exceptions) "
+                                           "— possibly a redundant/derivable column or an undocumented business rule."})
+            else:
+                alerts.append({"severity": "info", "column": None,
+                                "message": f"'{fd['determinant']}' appears to determine '{fd['dependent']}' "
+                                           f"in {round(fd['purity'] * 100, 1)}% of rows — {fd['violation_count']} exception(s) worth reviewing."})
         for c in column_profiles:
             if c["semantic_type"] == "constant":
                 alerts.append({"severity": "warning", "column": c["name"],
