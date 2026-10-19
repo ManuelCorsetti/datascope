@@ -28,7 +28,13 @@ _BOOL_LIKE_SETS = [
     {"true", "false"}, {"0", "1"}, {"yes", "no"}, {"y", "n"}, {"t", "f"},
 ]
 
-_ORDINAL_HINT_RE = re.compile(r"\b(level|tier|rank|grade|priority|rating|severity)\b", re.IGNORECASE)
+# Python's \b treats '_' as a word character, so a plain \b...\b pattern
+# never fires around it -- "priority_level" would not match \bpriority\b.
+# Same fix as pii.py's _w() helper, needed here for the same reason: real
+# column names are almost always snake_case compounds.
+_ORDINAL_HINT_RE = re.compile(
+    r"(?:^|_)(?:level|tier|rank|grade|priority|rating|severity)(?:_|$)", re.IGNORECASE
+)
 
 
 def _looks_like_id_name(name: str) -> bool:

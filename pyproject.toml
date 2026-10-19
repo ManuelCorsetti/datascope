@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datascope"
+description = "Extensive Python data profiling -> one self-contained interactive HTML dashboard."
+readme = "README.md"
+requires-python = ">=3.9"
+dynamic = ["version"]
+dependencies = [
+    "pandas>=1.5",
+    "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+excel = ["openpyxl>=3.0"]
+dev = ["pytest>=7", "pytest-cov>=4"]
+
+[project.scripts]
+datascope = "datascope.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "datascope.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
