@@ -117,7 +117,13 @@ class TestDatetimeStats:
         assert stats["future_dates"] == 0
 
     def test_future_dates_detected(self):
-        s = pd.Series(pd.to_datetime(["2020-01-01", "2999-01-01"]))
+        # A date far enough out to always be "future" relative to whenever
+        # this test runs, but safely inside datetime64[ns]'s representable
+        # range (~1677-2262) on every supported pandas version -- a
+        # hardcoded far-future date like "2999-01-01" overflows that range
+        # on pandas < 3.0 and raises OutOfBoundsDatetime instead.
+        future = (pd.Timestamp.now() + pd.Timedelta(days=3650)).strftime("%Y-%m-%d")
+        s = pd.Series(pd.to_datetime(["2020-01-01", future]))
         stats = compute_datetime_stats(s)
         assert stats["future_dates"] == 1
 
