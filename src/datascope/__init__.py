@@ -24,8 +24,8 @@ or pushed down to BigQuery (only aggregates leave the warehouse):
     profile_bigquery("project.dataset.table", output_html="report.html")
 """
 
-from .bigquery import BigQueryProfiler, profile_bigquery
+from .bigquery import BigQueryProfiler, estimate_bigquery_cost, profile_bigquery
 from .core import DataProfiler, profile
 
-__all__ = ["DataProfiler", "profile", "BigQueryProfiler", "profile_bigquery"]
+__all__ = ["DataProfiler", "profile", "BigQueryProfiler", "profile_bigquery", "estimate_bigquery_cost"]
 __version__ = "1.1.0"

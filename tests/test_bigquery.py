@@ -1,13 +1,14 @@
 import datetime as dt
 import json
 from collections import namedtuple
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from datascope import BigQueryProfiler, DataProfiler, profile_bigquery
-from datascope.bigquery import UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql, quote_identifier
+from datascope import BigQueryProfiler, DataProfiler, estimate_bigquery_cost, profile_bigquery
+from datascope.bigquery import UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql, format_bytes, quote_identifier
 from datascope.cli import main
 from datascope.html_report import _sanitize
 from datascope.semantic import infer_semantic_type_from_summary
@@ -104,13 +105,18 @@ class CannedClient:
 
     def __init__(self, schema, row):
         self.schema, self.row = schema, row
-        self.queries, self.tables = [], []
+        self.queries, self.tables, self.dry_runs = [], [], []
 
     def get_table(self, ref):
         self.tables.append(ref)
         return namedtuple("Table", "schema num_bytes")(self.schema, 3 * 1024 * 1024)
 
     def query(self, sql, job_config=None, **kwargs):
+        if getattr(job_config, "dry_run", False):
+            self.dry_runs.append(sql)
+            job = CannedJob([], schema=self.schema)
+            job.total_bytes_processed = 512 * 1024 ** 3  # 0.5 TiB per query
+            return job
         self.queries.append(sql)
         if "LIMIT 0" in sql:
             return CannedJob([], schema=self.schema)
@@ -249,6 +255,43 @@ class TestProfileShape:
         result = BigQueryProfiler(client=canned, exact_distinct=False).profile(table="proj.sales.orders")
         assert result["columns"][0]["unique"] == 1000
         assert result["pk_candidates"] == []
+
+
+@pytest.fixture
+def dry_run_config(monkeypatch):
+    """Stand in for bigquery.QueryJobConfig so dry runs work without the Google library."""
+    monkeypatch.setattr(BigQueryProfiler, "_job_config",
+                        lambda self, dry_run=False: SimpleNamespace(dry_run=dry_run))
+
+
+class TestEstimate:
+    def test_estimate_dry_runs_every_batch_and_runs_nothing(self, canned, dry_run_config):
+        est = BigQueryProfiler(client=canned, max_columns_per_query=2).estimate(table="proj.sales.orders")
+        assert canned.queries == []
+        assert canned.dry_runs == est["sql"] and est["queries"] == 2
+        assert est["bytes_processed"] == 1024 ** 4
+        assert est["bytes_processed_human"] == "1.00 TB"
+        assert est["estimated_cost_usd"] == 6.25
+        assert estimate_bigquery_cost("proj.sales.orders", client=canned, price_per_tib_usd=5)["estimated_cost_usd"] == 2.5
+
+    def test_estimate_refuses_to_run_for_real_when_dry_run_unavailable(self, canned, monkeypatch):
+        monkeypatch.setattr(BigQueryProfiler, "_job_config", lambda self, dry_run=False: None)
+        with pytest.raises(RuntimeError, match="dry run"):
+            BigQueryProfiler(client=canned).estimate(table="proj.sales.orders")
+        assert canned.queries == []
+
+    def test_cli_estimate(self, canned, dry_run_config, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(BigQueryProfiler, "client", property(lambda self: canned))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["datascope", "--bq-table", "proj.sales.orders", "--estimate"])
+        main()
+        out = capsys.readouterr().out
+        assert "will process 512.00 GB" in out and "$3.1250" in out and "Nothing was run" in out
+        assert canned.queries == [] and not list(tmp_path.iterdir())
+
+    def test_format_bytes(self):
+        assert [format_bytes(n) for n in (0, 1023, 1536, 5 * 1024 ** 2, 3 * 1024 ** 5)] == [
+            "0 B", "1023 B", "1.50 KB", "5.00 MB", "3072.00 TB"]
 
 
 class TestSemanticFromSummary:

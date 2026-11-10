@@ -212,6 +212,20 @@ def build_profile_sql(
     return "SELECT\n" + "\n".join(body) + f"\nFROM {from_clause} AS _datascope_src"
 
 
+# BigQuery on-demand list price (US multi-region), USD per TiB scanned.
+# It differs by region and doesn't apply to capacity (slot) pricing —
+# override with `price_per_tib_usd`.
+ON_DEMAND_USD_PER_TIB = 6.25
+
+
+def format_bytes(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.2f} {unit}"
+        n /= 1024
+    return f"{n:.2f} TB"  # pragma: no cover
+
+
 class UnsupportedColumnWarning(UserWarning):
     """A column was left out of the profile because of its type."""
 
@@ -356,6 +370,38 @@ class BigQueryProfiler:
         """The profiling SQL that `profile()` would run, without running
         it. Only reads the schema (table metadata / a dry run)."""
         return self._plan(table, query, columns)[1]
+
+    def estimate(self, table: Optional[str] = None, query: Optional[str] = None,
+                 columns: Optional[Sequence[str]] = None,
+                 price_per_tib_usd: float = ON_DEMAND_USD_PER_TIB) -> Dict[str, Any]:
+        """How much data `profile()` would scan, without running it.
+
+        Uses BigQuery dry runs (free; the same number the console shows
+        as "This query will process ..."). The figure is an upper bound:
+        clustered tables and cached results can come in lower.
+        `estimated_cost_usd` is bytes x the on-demand price and ignores
+        the monthly free tier; it doesn't apply if you pay for capacity.
+        """
+        # Checked first: without a dry-run config nothing below is safe to send.
+        if self._job_config(dry_run=True) is None:
+            raise RuntimeError(
+                "Estimating needs a dry run, which requires the google-cloud-bigquery "
+                'package: pip install "datascope[bigquery]"'
+            )
+        _, sqls, _, _, skipped = self._plan(table, query, columns)
+        total = 0
+        for sql in sqls:
+            job = self._run(sql, dry_run=True)
+            total += int(getattr(job, "total_bytes_processed", None) or 0)
+        return {
+            "bytes_processed": total,
+            "bytes_processed_human": format_bytes(total),
+            "estimated_cost_usd": round(total / 1024 ** 4 * price_per_tib_usd, 4),
+            "price_per_tib_usd": price_per_tib_usd,
+            "queries": len(sqls),
+            "sql": sqls,
+            "skipped_columns": skipped,
+        }
 
     def profile(self, table: Optional[str] = None, query: Optional[str] = None,
                 columns: Optional[Sequence[str]] = None, source_name: Optional[str] = None) -> Dict[str, Any]:
@@ -607,3 +653,18 @@ def profile_bigquery(
             import webbrowser
             webbrowser.open(f"file://{os.path.abspath(output_html)}")
     return result
+
+
+def estimate_bigquery_cost(
+    table: Optional[str] = None,
+    *,
+    query: Optional[str] = None,
+    columns: Optional[Sequence[str]] = None,
+    price_per_tib_usd: float = ON_DEMAND_USD_PER_TIB,
+    **kwargs,
+) -> Dict[str, Any]:
+    """Dry-run the profiling SQL for `table` / `query` and return how many
+    bytes it would scan and the approximate on-demand cost. Runs nothing
+    and costs nothing. Same arguments as `profile_bigquery`."""
+    return BigQueryProfiler(**kwargs).estimate(table=table, query=query, columns=columns,
+                                               price_per_tib_usd=price_per_tib_usd)

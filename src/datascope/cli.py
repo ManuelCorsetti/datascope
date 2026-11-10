@@ -29,6 +29,8 @@ def main() -> None:
     bq.add_argument("--approx-distinct", action="store_true",
                     help="Use APPROX_COUNT_DISTINCT instead of exact COUNT(DISTINCT) — cheaper on very large tables")
     bq.add_argument("--max-bytes-billed", type=int, default=None, help="Fail the query rather than bill more than this many bytes")
+    bq.add_argument("--estimate", action="store_true",
+                    help="Show how much data the profile would scan (and the approximate on-demand cost) and exit without running it")
     bq.add_argument("--print-sql", action="store_true", help="Print the profiling SQL and exit without running it")
     args = parser.parse_args()
 
@@ -51,12 +53,19 @@ def main() -> None:
         # Surface skipped-column warnings as plain lines on stderr.
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            if args.print_sql:
+            if args.estimate:
+                est = profiler.estimate(table=args.bq_table, query=query, columns=columns)
+            elif args.print_sql:
                 sqls = profiler.build_sql(table=args.bq_table, query=query, columns=columns)
             else:
                 result = profiler.profile(table=args.bq_table, query=query, columns=columns, source_name=args.name)
         for w in caught:
             print(f"Warning: {w.message}", file=sys.stderr)
+        if args.estimate:
+            print(f"This profile will process {est['bytes_processed_human']} when run "
+                  f"(about ${est['estimated_cost_usd']:.4f} at ${est['price_per_tib_usd']}/TiB on-demand). "
+                  "Nothing was run.")
+            return
         if args.print_sql:
             print(";\n\n".join(sqls))
             return

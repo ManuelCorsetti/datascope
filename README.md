@@ -91,6 +91,27 @@ datascope --bq-query-file recent_orders.sql -o recent_orders.html
 datascope --bq-table my-project.sales.orders --print-sql     # just show the SQL, run nothing
 ```
 
+**Check the cost first.** A dry run tells you how much data the profile
+will scan — the same figure the BigQuery console shows before you press
+Run — without running or billing anything:
+
+```python
+from datascope import estimate_bigquery_cost
+
+est = estimate_bigquery_cost("my-project.sales.orders")
+est["bytes_processed_human"]   # e.g. '12.40 GB'
+est["estimated_cost_usd"]      # bytes x on-demand price (default $6.25/TiB)
+```
+
+```
+datascope --bq-table my-project.sales.orders --estimate
+```
+
+The byte count is an upper bound (clustered tables can scan less). The
+dollar figure is only bytes x `price_per_tib_usd`: it ignores the
+monthly free tier, regional price differences, and doesn't apply if you
+pay for capacity (slots) rather than on-demand.
+
 **What the BigQuery engine computes** — in one scan of the source:
 total rows; per column nulls, distinct count and top values; numeric
 min / max / mean / std / sum / quartiles (median), zeros, negatives;

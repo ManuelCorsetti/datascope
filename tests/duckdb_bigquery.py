@@ -65,7 +65,7 @@ class _Job:
     def __init__(self, rows: Optional[List[_Row]], schema: List[SchemaField]):
         self._rows = rows
         self.schema = schema
-        self.total_bytes_processed = 0 if rows is None else 1234
+        self.total_bytes_processed = 5 * 1024 * 1024 if rows is None else 1234  # dry run: the estimate
 
     def result(self) -> _Result:
         return _Result(self._rows or [], self.schema)
