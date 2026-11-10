@@ -17,9 +17,15 @@ or straight from a file, no DataFrame needed:
 
     from datascope import profile
     profile("your_data.csv", output_html="report.html")
+
+or pushed down to BigQuery (only aggregates leave the warehouse):
+
+    from datascope import profile_bigquery
+    profile_bigquery("project.dataset.table", output_html="report.html")
 """
 
+from .bigquery import BigQueryProfiler, estimate_bigquery_cost, profile_bigquery
 from .core import DataProfiler, profile
 
-__all__ = ["DataProfiler", "profile"]
-__version__ = "1.0.0"
+__all__ = ["DataProfiler", "profile", "BigQueryProfiler", "profile_bigquery", "estimate_bigquery_cost"]
+__version__ = "1.1.0"

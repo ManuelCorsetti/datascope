@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "datascope"
 description = "Extensive Python data profiling -> one self-contained interactive HTML dashboard."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dynamic = ["version"]
 dependencies = [
     "pandas>=1.5",
@@ -15,7 +15,11 @@ dependencies = [
 
 [project.optional-dependencies]
 excel = ["openpyxl>=3.0"]
-dev = ["pytest>=7", "pytest-cov>=4"]
+bigquery = ["google-cloud-bigquery>=3.0"]
+# sqlglot + duckdb let the test suite execute the generated BigQuery SQL
+# locally (see tests/duckdb_bigquery.py); pytz is needed by duckdb to
+# return TIMESTAMP values.
+dev = ["pytest>=7", "pytest-cov>=4", "sqlglot>=25", "duckdb>=1.0", "pytz"]
 
 [project.scripts]
 datascope = "datascope.cli:main"

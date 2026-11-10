@@ -15,7 +15,7 @@ readable reasons shown in the report, not just a bare label.
 from __future__ import annotations
 
 import re
-from typing import List, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -124,3 +124,77 @@ def infer_semantic_type(series: pd.Series, col_name: str) -> Tuple[str, float, L
         ]
 
     return "unknown", 0.3, ["Could not confidently classify this column's semantic type."]
+
+
+def infer_semantic_type_from_summary(
+    col_name: str,
+    kind: str,
+    n_non_null: int,
+    unique_count: int,
+    avg_length: Optional[float] = None,
+    top_values: Optional[Sequence[str]] = None,
+) -> Tuple[str, float, List[str]]:
+    """Same classification as infer_semantic_type(), but driven by
+    pre-aggregated summary numbers instead of a Series — for engines
+    (BigQuery) where the rows never leave the warehouse.
+
+    `kind` is the coarse storage type: "numeric", "string", "boolean",
+    "datetime" or anything else (classified "unknown"). `top_values` are
+    the most frequent values as strings, only consulted to recognise
+    two-valued True/False-like columns.
+
+    The one thing this can't do is spot dates stored as text
+    ("datetime_string"): that needs the values themselves.
+    """
+    if n_non_null <= 0:
+        return "empty", 1.0, ["Column is entirely null."]
+    if unique_count == 1:
+        return "constant", 1.0, ["Only one distinct value across all non-null rows."]
+    if kind == "boolean":
+        return "boolean", 0.98, []
+    if kind == "datetime":
+        return "datetime", 0.95, []
+    if kind not in ("numeric", "string"):
+        return "unknown", 0.3, ["Could not confidently classify this column's semantic type."]
+
+    unique_pct = unique_count / n_non_null * 100
+
+    if unique_count == 2:
+        vals = set(str(v).strip().lower() for v in (top_values or []))
+        if vals in _BOOL_LIKE_SETS:
+            return "boolean", 0.9, ["Two distinct values resembling True/False."]
+        return "binary_categorical", 0.85, ["Exactly two distinct values."]
+
+    looks_id = _looks_like_id_name(col_name)
+
+    if kind == "numeric":
+        if unique_pct >= 95 and unique_count > 20:
+            if looks_id:
+                return "identifier", 0.9, [
+                    f"{round(unique_pct, 1)}% unique and the column name reads as an identifier."
+                ]
+            return "continuous_numeric", 0.75, [f"{round(unique_pct, 1)}% unique numeric values."]
+        if unique_count <= 20 or unique_pct < 5:
+            notes = ["Low cardinality numeric — may represent a code or category rather than a measure."]
+            if _looks_ordinal(col_name):
+                notes.append("Column name suggests an ordinal scale (tier/rank/level/...) — order likely matters, don't treat as a plain unordered category.")
+            return "discrete_numeric_categorical", 0.7, notes
+        return "continuous_numeric", 0.7, []
+
+    avg_len = float(avg_length or 0.0)
+    if unique_pct >= 98:
+        if looks_id or avg_len <= 40:
+            return "identifier", 0.85, [
+                f"{round(unique_pct, 1)}% unique values — likely a key or identifier."
+            ]
+        return "free_text", 0.75, ["High uniqueness with long values — likely free-form text."]
+    if avg_len > 80:
+        return "free_text", 0.75, [f"Average length {round(avg_len)} chars — likely free-form text."]
+    if unique_count <= 50 or unique_pct < 10:
+        notes = [f"Only {unique_count} distinct values."]
+        if _looks_ordinal(col_name):
+            notes.append("Column name suggests an ordinal scale (tier/rank/level/...) — order likely matters, don't treat as a plain unordered category.")
+        return "categorical", 0.85, notes
+    return "high_cardinality_text", 0.6, [
+        "High cardinality string — verify whether this should be categorical, an identifier, or free text."
+    ]
