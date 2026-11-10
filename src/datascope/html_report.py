@@ -155,6 +155,14 @@ section { margin-bottom: 22px; }
 .kpi-icon-badge .icon { color: var(--badge-color, var(--text-muted)); }
 .kpi-value { font-family: var(--font-mono); font-size: 22px; font-weight: 600; }
 .kpi-label { font-size: 10.5px; color: var(--text-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+.kpi-link { position: relative; display: flex; flex-direction: column; justify-content: flex-start; width: 100%; text-align: left; cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease; }
+.kpi-link:hover { transform: translateY(-2px); border-color: var(--teal); }
+.kpi-link-arrow { position: absolute; top: 14px; right: 14px; color: var(--text-faint); transition: color .15s ease, transform .15s ease; }
+.kpi-link:hover .kpi-link-arrow, .kpi-link:focus-visible .kpi-link-arrow { color: var(--teal); transform: translateY(2px); }
+#alerts-panel, #columns-section { scroll-margin-top: 76px; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--teal); } to { box-shadow: 0 0 0 3px transparent; } }
+.flash { animation: flash 1.4s ease-out; border-radius: var(--radius); }
 .kpi-bar { margin-top: 10px; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .kpi-bar span { display: block; height: 100%; border-radius: 2px; transition: width 0.6s ease; }
 
@@ -353,7 +361,7 @@ table.heatmap th { padding: 4px 6px; }
     <div id="fd-list"></div>
   </section>
 
-  <section class="columns-section">
+  <section class="columns-section" id="columns-section">
     <div class="columns-header">
       <div class="columns-title"><span class="material-symbols-outlined icon">table_view</span>Columns</div>
       <div class="column-count" id="column-count"></div>
@@ -521,24 +529,63 @@ function renderHero() {
   const completeness = Math.max(0, 100 - o.total_missing_pct);
   const alertCount = (o.alerts || []).length;
   const completenessColor = completeness > 90 ? 'var(--green)' : completeness > 70 ? 'var(--amber)' : 'var(--coral)';
+  const nCols = (PROFILE.columns || []).length;
+  // `link` names a KPI_LINKS entry; tiles with nothing to drill into
+  // (rows, duplicates, memory) stay static rather than linking somewhere
+  // that doesn't explain the number.
   const tiles = [
     {label: 'Rows', value: fmtInt(m.n_rows), iconName: 'table_rows', color: 'var(--teal)'},
-    {label: 'Columns', value: fmtInt(m.n_cols), iconName: 'view_column', color: 'var(--teal)'},
-    {label: 'Completeness', value: fmtPct(completeness), bar: completeness, barColor: completenessColor, iconName: 'task_alt', color: completenessColor},
+    {label: 'Columns', value: fmtInt(m.n_cols), iconName: 'view_column', color: 'var(--teal)', link: nCols > 0 ? 'columns' : null},
+    {label: 'Completeness', value: fmtPct(completeness), bar: completeness, barColor: completenessColor, iconName: 'task_alt', color: completenessColor, link: o.total_missing_pct > 0 ? 'missing' : null},
     {label: 'Duplicate rows', value: fmtInt(m.duplicate_rows) + (m.duplicate_rows_pct ? ' (' + fmtPct(m.duplicate_rows_pct) + ')' : ''), iconName: 'content_copy', color: m.duplicate_rows > 0 ? 'var(--amber)' : 'var(--text-faint)'},
-    {label: 'Sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)'},
-    {label: 'Alerts', value: fmtInt(alertCount), iconName: 'warning', color: alertCount > 0 ? 'var(--amber)' : 'var(--text-faint)'},
+    {label: 'Sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)', link: o.sensitive_columns_count > 0 ? 'sensitive' : null},
+    {label: 'Alerts', value: fmtInt(alertCount), iconName: 'warning', color: alertCount > 0 ? 'var(--amber)' : 'var(--text-faint)', link: alertCount > 0 ? 'alerts' : null},
     {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '\u2014' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
   ];
-  const html = tiles.map((t,i) =>
-    '<div class="kpi-card" style="--i:' + (i+1) + '">' +
+  const html = tiles.map((t,i) => {
+    const link = t.link && KPI_LINKS[t.link];
+    const inner =
       '<div class="kpi-icon-badge" style="--badge-color:' + t.color + ';--badge-bg:' + softBg(t.color) + '">' + icon(t.iconName, 'xl', null, true) + '</div>' +
       '<div class="kpi-value">' + esc(t.value) + '</div>' +
       '<div class="kpi-label">' + esc(t.label) + '</div>' +
-      (t.bar !== undefined ? '<div class="kpi-bar"><span style="width:' + t.bar + '%; background:' + t.barColor + '"></span></div>' : '') +
-    '</div>'
-  ).join('');
-  document.getElementById('kpi-grid').insertAdjacentHTML('beforeend', html);
+      (t.bar !== undefined ? '<div class="kpi-bar"><span style="width:' + t.bar + '%; background:' + t.barColor + '"></span></div>' : '');
+    if (!link) return '<div class="kpi-card" style="--i:' + (i+1) + '">' + inner + '</div>';
+    return '<button type="button" class="kpi-card kpi-link" style="--i:' + (i+1) + '" data-kpi-link="' + t.link + '" title="' + esc(link.hint) + '">' +
+      '<span class="kpi-link-arrow">' + icon('arrow_downward', 'sm') + '</span>' + inner + '</button>';
+  }).join('');
+  const grid = document.getElementById('kpi-grid');
+  grid.insertAdjacentHTML('beforeend', html);
+  grid.querySelectorAll('[data-kpi-link]').forEach(btn => btn.addEventListener('click', () => KPI_LINKS[btn.dataset.kpiLink].go()));
+}
+
+// Each KPI link puts the target section into the view that explains the
+// number, then scrolls to it.
+const KPI_LINKS = {
+  columns:   {hint: 'Show all columns',                   go: () => { setColumnView({}); jumpTo('columns-section'); }},
+  missing:   {hint: 'Show columns sorted by missing %',   go: () => { setColumnView({sort: 'missing'}); jumpTo('columns-section'); }},
+  sensitive: {hint: 'Show only sensitive columns',        go: () => { setColumnView({sensitiveOnly: true}); jumpTo('columns-section'); }},
+  alerts:    {hint: 'Jump to alerts',                     go: () => jumpTo('alerts-panel')},
+};
+
+function setColumnView(opts) {
+  state.search = '';
+  document.getElementById('search-input').value = '';
+  state.typeFilters.clear();
+  document.querySelectorAll('[data-filter-type]').forEach(b => b.classList.remove('active'));
+  state.sensitiveOnly = !!opts.sensitiveOnly;
+  const sensBtn = document.querySelector('[data-filter-sensitive]');
+  if (sensBtn) { sensBtn.classList.toggle('active', state.sensitiveOnly); sensBtn.setAttribute('aria-pressed', String(state.sensitiveOnly)); }
+  if (opts.sort) { state.sort = opts.sort; document.getElementById('sort-select').value = opts.sort; }
+  renderColumnGrid();
+}
+
+function jumpTo(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({block: 'start'});
+  el.classList.remove('flash');
+  void el.offsetWidth;  // restart the animation on repeat clicks
+  el.classList.add('flash');
 }
 
 function renderAlerts() {
