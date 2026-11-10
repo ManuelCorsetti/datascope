@@ -51,6 +51,18 @@ class TestSqlGeneration:
         assert "COUNT(DISTINCT TO_JSON_STRING(`payload`))" in sql
         assert "APPROX_TOP_COUNT" not in sql
 
+    def test_unknown_type_raises_instead_of_guessing(self):
+        with pytest.raises(ValueError, match=r"'VECTOR'.*'emb'"):
+            build_profile_sql("`p.d.t`", [("id", "INT64", "NULLABLE"), ("emb", "VECTOR", "NULLABLE")])
+        with pytest.raises(ValueError, match="Unsupported BigQuery type"):
+            build_profile_sql("`p.d.t`", [("emb", "VECTOR", "REPEATED")])
+
+    def test_every_documented_type_is_accepted(self):
+        types = ["INT64", "INTEGER", "FLOAT64", "FLOAT", "NUMERIC", "BIGNUMERIC", "STRING", "BYTES", "BOOL",
+                 "BOOLEAN", "DATE", "DATETIME", "TIMESTAMP", "TIME", "STRUCT", "RECORD", "JSON", "GEOGRAPHY",
+                 "RANGE", "INTERVAL", "string"]
+        build_profile_sql("`p.d.t`", [(f"c{i}", t, "NULLABLE") for i, t in enumerate(types)])
+
     def test_top_values_can_be_disabled(self):
         assert "APPROX_TOP_COUNT" not in build_profile_sql("`p.d.t`", [("a", "STRING", "NULLABLE")], top_n_values=0)
 
@@ -187,6 +199,16 @@ class TestProfileShape:
         assert "FROM (\nSELECT * FROM `proj.sales.orders` WHERE amount > 0\n) AS _datascope_src" in canned.queries[-1]
         assert result["meta"]["source_name"] == "query"
         assert result["meta"]["memory_mb"] is None
+
+    def test_unknown_type_fails_before_any_query_runs(self, canned):
+        canned.schema.append(Field("emb", "VECTOR", "NULLABLE"))
+        profiler = BigQueryProfiler(client=canned)
+        with pytest.raises(ValueError, match="emb"):
+            profiler.profile(table="proj.sales.orders")
+        assert canned.queries == []
+        # ...and leaving the column out is a working escape hatch
+        result = profiler.profile(table="proj.sales.orders", columns=["order_id", "amount"])
+        assert [c["name"] for c in result["columns"]] == ["order_id", "amount"]
 
     def test_exactly_one_source_required(self, canned):
         profiler = BigQueryProfiler(client=canned)

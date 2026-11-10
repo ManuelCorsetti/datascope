@@ -47,6 +47,8 @@ _NUMERIC_TYPES = {"INT64", "INTEGER", "FLOAT64", "FLOAT", "NUMERIC", "BIGNUMERIC
 _INTEGER_TYPES = {"INT64", "INTEGER"}
 _FLOAT_TYPES = {"FLOAT64", "FLOAT"}
 _BOOL_TYPES = {"BOOL", "BOOLEAN"}
+# Types profiled by null + distinct count only (compared as JSON text).
+_COMPLEX_TYPES = {"STRUCT", "RECORD", "JSON", "GEOGRAPHY", "RANGE", "INTERVAL"}
 _DATETIME_NOW = {"DATE": "CURRENT_DATE()", "DATETIME": "CURRENT_DATETIME()", "TIMESTAMP": "CURRENT_TIMESTAMP()"}
 # EXTRACT(DAYOFWEEK ...) numbering: 1 = Sunday.
 _WEEKDAYS = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
@@ -55,24 +57,35 @@ _TRAILING_SEMICOLON_RE = re.compile(r"(;(\s|--[^\n]*|#[^\n]*|/\*.*?\*/)*)+\Z", r
 _TABLE_REF_RE = re.compile(r"^([\w\-]+[.:])?[\w\-]+\.[\w\-$*]+$")
 
 
-def _column_kind(field_type: str, mode: str) -> str:
-    """Collapse a BigQuery type into the handful of shapes we profile."""
-    t = field_type.upper()
-    if (mode or "").upper() == "REPEATED":
-        return "complex"
+def _column_kind(field_type: str, mode: str, name: Optional[str] = None) -> str:
+    """Collapse a BigQuery type into the handful of shapes we profile.
+
+    Raises ValueError for a type that isn't recognised, rather than
+    guessing how to aggregate it.
+    """
+    t = (field_type or "").upper()
+    known = t in _COMPLEX_TYPES
+    kind = "complex"
     if t in _NUMERIC_TYPES:
-        return "numeric"
-    if t == "STRING":
-        return "string"
-    if t == "BYTES":
-        return "bytes"
-    if t in _BOOL_TYPES:
-        return "boolean"
-    if t in _DATETIME_NOW:
-        return "datetime"
-    if t == "TIME":
-        return "time"
-    return "complex"  # STRUCT/RECORD, JSON, GEOGRAPHY, RANGE, INTERVAL, ...
+        kind, known = "numeric", True
+    elif t == "STRING":
+        kind, known = "string", True
+    elif t == "BYTES":
+        kind, known = "bytes", True
+    elif t in _BOOL_TYPES:
+        kind, known = "boolean", True
+    elif t in _DATETIME_NOW:
+        kind, known = "datetime", True
+    elif t == "TIME":
+        kind, known = "time", True
+    if not known:
+        where = f" for column {name!r}" if name else ""
+        raise ValueError(
+            f"Unsupported BigQuery type {field_type!r}{where}. "
+            "Exclude it with `columns=[...]`, or add the type to datascope.bigquery."
+        )
+    # An ARRAY of any known element type is profiled as a complex value.
+    return "complex" if (mode or "").upper() == "REPEATED" else kind
 
 
 def quote_identifier(name: str) -> str:
@@ -103,7 +116,7 @@ def _column_expressions(alias: str, name: str, field_type: str, mode: str,
                         top_n: int, exact_distinct: bool) -> List[Tuple[str, str]]:
     """(result_column_alias, sql_expression) pairs for one column."""
     c = quote_identifier(name)
-    kind = _column_kind(field_type, mode)
+    kind = _column_kind(field_type, mode, name)
     t = field_type.upper()
     out: List[Tuple[str, str]] = []
 
@@ -397,7 +410,7 @@ class BigQueryProfiler:
         def get(metric: str) -> Any:
             return row.get(f"{alias}__{metric}")
 
-        kind = _column_kind(field_type, mode)
+        kind = _column_kind(field_type, mode, name)
         repeated = (mode or "").upper() == "REPEATED"
         missing = int(get("missing") or 0)
         non_null = max(n_rows - missing, 0)
