@@ -47,7 +47,7 @@ def _bq_type(duck_type: str) -> SchemaField:
             "DOUBLE": "FLOAT64", "FLOAT": "FLOAT64", "VARCHAR": "STRING", "BOOLEAN": "BOOL",
             "DATE": "DATE", "TIME": "TIME", "TIMESTAMP": "DATETIME", "TIMESTAMP_NS": "DATETIME",
             "TIMESTAMP WITH TIME ZONE": "TIMESTAMP", "BLOB": "BYTES", "JSON": "JSON",
-        }.get(t, "STRING")
+        }.get(t, t)  # unmapped types keep their own name -> "unsupported"
     return SchemaField("", bq, mode)
 
 

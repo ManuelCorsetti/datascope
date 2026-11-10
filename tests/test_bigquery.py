@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from datascope import BigQueryProfiler, DataProfiler, profile_bigquery
-from datascope.bigquery import _query_from_clause, _table_from_clause, build_profile_sql, quote_identifier
+from datascope.bigquery import UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql, quote_identifier
 from datascope.cli import main
 from datascope.html_report import _sanitize
 from datascope.semantic import infer_semantic_type_from_summary
@@ -200,15 +200,38 @@ class TestProfileShape:
         assert result["meta"]["source_name"] == "query"
         assert result["meta"]["memory_mb"] is None
 
-    def test_unknown_type_fails_before_any_query_runs(self, canned):
-        canned.schema.append(Field("emb", "VECTOR", "NULLABLE"))
+    def test_unknown_type_is_skipped_with_a_warning(self, canned, tmp_path):
+        canned.schema.insert(1, Field("emb", "VECTOR", "NULLABLE"))
+        # shift the canned aliases: the skipped column takes no alias
         profiler = BigQueryProfiler(client=canned)
-        with pytest.raises(ValueError, match="emb"):
-            profiler.profile(table="proj.sales.orders")
-        assert canned.queries == []
-        # ...and leaving the column out is a working escape hatch
-        result = profiler.profile(table="proj.sales.orders", columns=["order_id", "amount"])
-        assert [c["name"] for c in result["columns"]] == ["order_id", "amount"]
+        with pytest.warns(UnsupportedColumnWarning, match="'emb' was skipped: unsupported BigQuery type VECTOR"):
+            result = profiler.profile(table="proj.sales.orders")
+        assert "emb" not in canned.queries[-1]
+        assert [c["name"] for c in result["columns"]] == ["order_id", "customer_email", "amount"]
+        assert result["columns"][2]["numeric_stats"]["max"] == 99.0
+        assert result["meta"]["n_cols"] == 3
+        assert result["meta"]["skipped_columns"] == [
+            {"name": "emb", "dtype": "VECTOR", "reason": "unsupported BigQuery type VECTOR"}]
+        messages = [a["message"] for a in result["overview"]["alerts"]]
+        assert "Column 'emb' was skipped: unsupported BigQuery type VECTOR." in messages
+        out = tmp_path / "r.html"
+        profiler.to_html(result, str(out))
+        assert "was skipped: unsupported BigQuery type VECTOR" in out.read_text(encoding="utf-8")
+
+    def test_no_warning_or_skips_when_all_types_supported(self, canned, recwarn):
+        result = BigQueryProfiler(client=canned).profile(table="proj.sales.orders")
+        assert result["meta"]["skipped_columns"] == []
+        assert not [w for w in recwarn if issubclass(w.category, UnsupportedColumnWarning)]
+
+    def test_cli_prints_skip_warning_to_stderr(self, canned, tmp_path, monkeypatch, capsys):
+        canned.schema.append(Field("emb", "VECTOR", "NULLABLE"))
+        monkeypatch.setattr(BigQueryProfiler, "client", property(lambda self: canned))
+        out = tmp_path / "cli.html"
+        monkeypatch.setattr("sys.argv", ["datascope", "--bq-table", "proj.sales.orders", "-o", str(out)])
+        main()
+        captured = capsys.readouterr()
+        assert "Warning: Column 'emb' was skipped: unsupported BigQuery type VECTOR." in captured.err
+        assert "Report written" in captured.out and out.exists()
 
     def test_exactly_one_source_required(self, canned):
         profiler = BigQueryProfiler(client=canned)
@@ -275,7 +298,10 @@ def warehouse():
     client = DuckDBBigQueryClient(project="demo", dataset="shop")
     df = _customers()
     client.load("customers", df)
-    client.load("empty", df.head(0))
+    client.con.execute("CREATE TABLE demo.shop.empty AS SELECT * FROM demo.shop.customers LIMIT 0")
+    # DuckDB's UUID has no BigQuery counterpart here -> an unsupported type
+    client.con.execute("CREATE TABLE demo.shop.sessions AS "
+                       "SELECT i AS id, uuid() AS session, i % 3 AS grp FROM range(200) r(i)")
     return client, df
 
 
@@ -367,6 +393,15 @@ class TestExecutedAgainstRealData:
         assert result["meta"]["n_rows"] == 0
         assert {c["semantic_type"] for c in result["columns"]} == {"empty"}
         assert result["overview"]["quality_score"] is None
+
+    def test_unsupported_column_is_skipped_and_the_rest_profiled(self, warehouse):
+        client, _ = warehouse
+        with pytest.warns(UnsupportedColumnWarning, match="'session' was skipped"):
+            result = profile_bigquery("demo.shop.sessions", client=client, output_html=None)
+        assert [c["name"] for c in result["columns"]] == ["id", "grp"]
+        assert result["columns"][0]["unique"] == 200
+        assert result["columns"][1]["unique"] == 3
+        assert [s["name"] for s in result["meta"]["skipped_columns"]] == ["session"]
 
     def test_cli_runs_and_prints_sql(self, warehouse, tmp_path, monkeypatch, capsys):
         client, _ = warehouse

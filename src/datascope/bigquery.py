@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -61,7 +62,8 @@ def _column_kind(field_type: str, mode: str, name: Optional[str] = None) -> str:
     """Collapse a BigQuery type into the handful of shapes we profile.
 
     Raises ValueError for a type that isn't recognised, rather than
-    guessing how to aggregate it.
+    guessing how to aggregate it (BigQueryProfiler skips such columns
+    with a warning).
     """
     t = (field_type or "").upper()
     known = t in _COMPLEX_TYPES
@@ -81,8 +83,7 @@ def _column_kind(field_type: str, mode: str, name: Optional[str] = None) -> str:
     if not known:
         where = f" for column {name!r}" if name else ""
         raise ValueError(
-            f"Unsupported BigQuery type {field_type!r}{where}. "
-            "Exclude it with `columns=[...]`, or add the type to datascope.bigquery."
+            f"Unsupported BigQuery type {field_type!r}{where}."
         )
     # An ARRAY of any known element type is profiled as a complex value.
     return "complex" if (mode or "").upper() == "REPEATED" else kind
@@ -211,6 +212,14 @@ def build_profile_sql(
     return "SELECT\n" + "\n".join(body) + f"\nFROM {from_clause} AS _datascope_src"
 
 
+class UnsupportedColumnWarning(UserWarning):
+    """A column was left out of the profile because of its type."""
+
+
+def _skip_message(name: str, field_type: str) -> str:
+    return f"Column '{name}' was skipped: unsupported BigQuery type {field_type}."
+
+
 class BigQueryProfiler:
     """Profile a BigQuery table or query by pushing the work down as SQL.
 
@@ -321,14 +330,25 @@ class BigQueryProfiler:
 
     def _plan(self, table: Optional[str], query: Optional[str], columns: Optional[Sequence[str]]):
         from_clause, schema, num_bytes, default_name = self._resolve_source(table, query)
-        fields = self._select_fields(schema, columns)
+        fields, skipped = [], []
+        for name, field_type, mode in self._select_fields(schema, columns):
+            try:
+                _column_kind(field_type, mode, name)
+            except ValueError:
+                # Don't guess how to aggregate an unknown type, and don't
+                # let one odd column block the rest: leave it out, loudly.
+                skipped.append({"name": name, "dtype": field_type,
+                                "reason": f"unsupported BigQuery type {field_type}"})
+                warnings.warn(_skip_message(name, field_type), UnsupportedColumnWarning, stacklevel=4)
+            else:
+                fields.append((name, field_type, mode))
         sqls = [
             build_profile_sql(from_clause, fields[start:start + self.max_columns_per_query],
                               top_n_values=self.top_n_values, exact_distinct=self.exact_distinct,
                               alias_offset=start)
             for start in range(0, len(fields), self.max_columns_per_query)
         ] or [build_profile_sql(from_clause, [])]
-        return fields, sqls, num_bytes, default_name
+        return fields, sqls, num_bytes, default_name, skipped
 
     # ------------------------------------------------------------ public
     def build_sql(self, table: Optional[str] = None, query: Optional[str] = None,
@@ -339,7 +359,7 @@ class BigQueryProfiler:
 
     def profile(self, table: Optional[str] = None, query: Optional[str] = None,
                 columns: Optional[Sequence[str]] = None, source_name: Optional[str] = None) -> Dict[str, Any]:
-        fields, sqls, num_bytes, default_name = self._plan(table, query, columns)
+        fields, sqls, num_bytes, default_name, skipped = self._plan(table, query, columns)
 
         row: Dict[str, Any] = {}
         bytes_processed = 0
@@ -381,6 +401,8 @@ class BigQueryProfiler:
                 "sql": sqls,
                 "bytes_processed": bytes_processed,
                 "exact_distinct": self.exact_distinct,
+                # Columns left out because their type isn't supported.
+                "skipped_columns": skipped,
             },
             "overview": {
                 "type_distribution": type_distribution,
@@ -396,7 +418,9 @@ class BigQueryProfiler:
             "duplicate_columns": [],
             "functional_dependencies": [],
         }
-        result["overview"]["alerts"] = DataProfiler()._build_alerts(column_profiles, 0, n_rows)
+        alerts = [{"severity": "warning", "column": None, "message": _skip_message(sk["name"], sk["dtype"])}
+                  for sk in skipped]
+        result["overview"]["alerts"] = alerts + DataProfiler()._build_alerts(column_profiles, 0, n_rows)
         result["overview"]["quality_score"] = compute_quality_score(result)
         return result
 

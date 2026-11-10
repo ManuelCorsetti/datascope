@@ -115,6 +115,11 @@ quality score are derived from those, as usual.
   `max_columns_per_query=100` columns; each column is still read once).
   A SQL query source is re-run for each of those batches. Use
   `maximum_bytes_billed=` (`--max-bytes-billed`) as a safety cap.
+- A column whose type datascope doesn't recognise is **skipped, not
+  guessed at**: the rest of the table is still profiled, and the skip is
+  reported as a warning in the report's Alerts panel, on stderr from the
+  command line, as a Python `UnsupportedColumnWarning`, and in
+  `result["meta"]["skipped_columns"]`.
 - `ARRAY` columns count empty arrays as missing; `ARRAY`/`STRUCT`/`JSON`/
   `GEOGRAPHY` columns only get null and distinct counts.
 

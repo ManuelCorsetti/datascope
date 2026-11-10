@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import sys
+import warnings
 
 
 def main() -> None:
@@ -46,10 +48,18 @@ def main() -> None:
             project=args.bq_project, location=args.bq_location,
             exact_distinct=not args.approx_distinct, maximum_bytes_billed=args.max_bytes_billed,
         )
+        # Surface skipped-column warnings as plain lines on stderr.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            if args.print_sql:
+                sqls = profiler.build_sql(table=args.bq_table, query=query, columns=columns)
+            else:
+                result = profiler.profile(table=args.bq_table, query=query, columns=columns, source_name=args.name)
+        for w in caught:
+            print(f"Warning: {w.message}", file=sys.stderr)
         if args.print_sql:
-            print(";\n\n".join(profiler.build_sql(table=args.bq_table, query=query, columns=columns)))
+            print(";\n\n".join(sqls))
             return
-        result = profiler.profile(table=args.bq_table, query=query, columns=columns, source_name=args.name)
         profiler.to_html(result, args.output)
         if args.open:
             import os
