@@ -528,7 +528,7 @@ function renderHero() {
     {label: 'Duplicate rows', value: fmtInt(m.duplicate_rows) + (m.duplicate_rows_pct ? ' (' + fmtPct(m.duplicate_rows_pct) + ')' : ''), iconName: 'content_copy', color: m.duplicate_rows > 0 ? 'var(--amber)' : 'var(--text-faint)'},
     {label: 'Sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)'},
     {label: 'Alerts', value: fmtInt(alertCount), iconName: 'warning', color: alertCount > 0 ? 'var(--amber)' : 'var(--text-faint)'},
-    {label: 'Memory', value: m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
+    {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '\u2014' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
   ];
   const html = tiles.map((t,i) =>
     '<div class="kpi-card" style="--i:' + (i+1) + '">' +
@@ -600,7 +600,7 @@ function renderHeatmap(containerId, data, emptyMsg) {
   container.innerHTML = html;
   wireTooltips(container);
 }
-function renderCorrelation() { renderHeatmap('corr-heatmap', PROFILE.correlations, 'Fewer than two numeric columns \u2014 nothing to correlate.'); }
+function renderCorrelation() { renderHeatmap('corr-heatmap', PROFILE.correlations, PROFILE.meta.engine === 'bigquery' ? 'Not computed by the BigQuery engine.' : 'Fewer than two numeric columns \u2014 nothing to correlate.'); }
 function renderMissingCorr() {
   const section = document.getElementById('missing-corr-section');
   if (!PROFILE.missing_correlation) { section.style.display = 'none'; return; }

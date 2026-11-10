@@ -121,7 +121,8 @@ def compute_quality_score(profile: Dict[str, Any]) -> Optional[float]:
         return None
 
     completeness = 1 - profile["overview"]["total_missing_pct"] / 100
-    dup_score = 1 - min(meta["duplicate_rows_pct"] / 100, 1.0)
+    # duplicate_rows_pct is None when the engine didn't measure it (BigQuery).
+    dup_score = 1 - min((meta.get("duplicate_rows_pct") or 0.0) / 100, 1.0)
     constant_cols = sum(1 for c in cols if c["semantic_type"] == "constant")
     structure_score = 1 - (constant_cols / len(cols))
 

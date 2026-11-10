@@ -49,6 +49,75 @@ duplicate rows):
 python example.py
 ```
 
+## BigQuery
+
+Profile a table or a query *inside* BigQuery: datascope writes the SQL,
+BigQuery runs it, and only the aggregated results come back — no rows
+are downloaded. The result is the same profile dict and HTML report as
+the local engine.
+
+```
+pip install -e ".[bigquery]"
+```
+
+```python
+from datascope import profile_bigquery
+
+# a whole table
+profile_bigquery("my-project.sales.orders", output_html="orders.html")
+
+# a sub-selection of columns
+profile_bigquery("my-project.sales.orders", columns=["order_id", "amount", "status"])
+
+# a SQL query — every column the query returns is profiled
+profile_bigquery(query="""
+    SELECT o.*, c.country
+    FROM `my-project.sales.orders` o JOIN `my-project.sales.customers` c USING (customer_id)
+    WHERE o.created_at >= '2026-01-01'
+""", output_html="recent_orders.html")
+```
+
+It returns the profile dict (`output_html=None` skips the report), and
+the SQL that ran is in `result["meta"]["sql"]`. Authentication uses your
+default Google credentials (`gcloud auth application-default login`);
+pass `project=` / `location=`, or your own `client=`, to override.
+
+From the command line:
+
+```
+datascope --bq-table my-project.sales.orders -o orders.html
+datascope --bq-table my-project.sales.orders --columns order_id,amount -o orders.html
+datascope --bq-query-file recent_orders.sql -o recent_orders.html
+datascope --bq-table my-project.sales.orders --print-sql     # just show the SQL, run nothing
+```
+
+**What the BigQuery engine computes** — in one scan of the source:
+total rows; per column nulls, distinct count and top values; numeric
+min / max / mean / std / sum / quartiles (median), zeros, negatives;
+string length stats and blank count; date range, future-dated values and
+weekday split; boolean true/false split. Semantic types, quality rules,
+dbt snippets, single-column primary-key candidates, alerts and the
+quality score are derived from those, as usual.
+
+**Things to know**
+
+- Quartiles/median use `APPROX_QUANTILES` and top values use
+  `APPROX_TOP_COUNT`, so they are approximate on large tables. Distinct
+  counts are exact by default; pass `exact_distinct=False`
+  (`--approx-distinct`) to switch to `APPROX_COUNT_DISTINCT` on very
+  large tables.
+- Not computed yet (each needs extra passes over the data): histograms,
+  outlier counts, skew/kurtosis, correlations, duplicate rows, composite
+  keys, functional dependencies, and detecting dates stored as text.
+- PII/PHI detection is by **column name only** — content checks would
+  mean pulling values out of the warehouse.
+- Cost: a table is scanned once (wide tables are split into queries of
+  `max_columns_per_query=100` columns; each column is still read once).
+  A SQL query source is re-run for each of those batches. Use
+  `maximum_bytes_billed=` (`--max-bytes-billed`) as a safety cap.
+- `ARRAY` columns count empty arrays as missing; `ARRAY`/`STRUCT`/`JSON`/
+  `GEOGRAPHY` columns only get null and distinct counts.
+
 ## What it computes, per column
 
 - **Summary stats** — count, missing %, unique %, memory; numeric: mean,
@@ -107,8 +176,9 @@ src/datascope/
   quality.py       quality-rule + dbt-snippet recommendations, quality score
   relationships.py functional dependency detection (column A -> column B)
   html_report.py   renders the profile dict to the HTML dashboard
+  bigquery.py      BigQuery engine: generates profiling SQL, maps results to the profile dict
   cli.py / __main__.py   `python -m datascope`
-tests/              pytest suite
+tests/              pytest suite (duckdb_bigquery.py runs the generated BigQuery SQL on DuckDB)
 example.py          synthetic messy dataset + runnable demo
 ```
 
