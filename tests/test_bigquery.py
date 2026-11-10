@@ -201,7 +201,8 @@ class TestProfileShape:
     def test_query_source_reads_schema_then_profiles_subquery(self, canned):
         result = BigQueryProfiler(client=canned).profile(query="SELECT * FROM `proj.sales.orders` WHERE amount > 0;")
         assert canned.tables == []
-        assert "LIMIT 0" in canned.queries[0]
+        # the schema probe is a dry run when the Google library is installed
+        assert "LIMIT 0" in (canned.dry_runs + canned.queries)[0]
         assert "FROM (\nSELECT * FROM `proj.sales.orders` WHERE amount > 0\n) AS _datascope_src" in canned.queries[-1]
         assert result["meta"]["source_name"] == "query"
         assert result["meta"]["memory_mb"] is None
