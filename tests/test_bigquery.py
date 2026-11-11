@@ -165,13 +165,18 @@ class TestProfileShape:
     def test_table_profile_maps_aggregates_into_profile_dict(self, canned):
         result = BigQueryProfiler(client=canned).profile(table="proj.sales.orders")
         assert canned.tables == ["proj.sales.orders"]
-        assert len(canned.queries) == 1
+        # profiling (approximate distinct counts), then an exact recount of the
+        # one column that could be a key: order_id (no NULLs, 1000/1000 distinct)
+        assert len(canned.queries) == 2
+        assert "APPROX_COUNT_DISTINCT(`order_id`)" in canned.queries[0]
+        assert canned.queries[1] == "SELECT\n  COUNT(DISTINCT `order_id`) AS c0__distinct\nFROM `proj.sales.orders` AS _datascope_src"
         meta = result["meta"]
+        assert meta["exact_distinct_columns"] == ["order_id"]
         assert (meta["n_rows"], meta["n_cols"], meta["engine"]) == (1000, 3, "bigquery")
         assert meta["source_name"] == "proj.sales.orders"
         assert meta["memory_mb"] == 3.0
         assert meta["sql"] == canned.queries
-        assert meta["bytes_processed"] == 2048
+        assert meta["bytes_processed"] == 2 * 2048  # the canned client bills 2 KB per query
         assert meta["duplicate_rows"] is None
 
         order_id, email, amount = result["columns"]
@@ -212,7 +217,8 @@ class TestProfileShape:
     def test_correlations_ride_in_the_first_query_only(self, canned):
         canned.row["corr__0__2"] = 0.912345
         result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
-        first, second = result["meta"]["sql"]
+        first, second, recount = result["meta"]["sql"]
+        assert recount.startswith("SELECT\n  COUNT(DISTINCT `order_id`)")
         assert "CORR(CAST(`order_id` AS FLOAT64), CAST(`amount` AS FLOAT64)) AS corr__0__2" in first
         assert "CORR(" not in second
         assert result["correlations"] == {"columns": ["order_id", "amount"],
@@ -255,15 +261,16 @@ class TestProfileShape:
         profiler = BigQueryProfiler(client=canned, suggested_references="check")
         planned = profiler.build_sql("proj.sales.orders")
         assert len(planned) == 2 and "`parent_order_id` AS v" in planned[1]
-        assert profiler.estimate(table="proj.sales.orders")["sections"][-1]["note"].startswith("Upper bound")
+        by = {s["section"]: s for s in profiler.estimate(table="proj.sales.orders")["sections"]}
+        assert by["reference parent_order_id -> order_id (suggested)"]["note"].startswith("Upper bound")
         # ... but canned row has no stats for parent_order_id -> not a plausible child, nothing extra runs
         result = profiler.profile(table="proj.sales.orders")
-        assert len(result["meta"]["sql"]) == 1 and result["referential_integrity"] == []
+        assert not any("_datascope_ref" in q for q in result["meta"]["sql"]) and result["referential_integrity"] == []
         assert BigQueryProfiler(client=canned, suggested_references="off").build_sql("proj.sales.orders") == planned[:1]
 
     def test_wide_tables_are_split_into_batches(self, canned):
         result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
-        assert len(result["meta"]["sql"]) == 2
+        assert len(result["meta"]["sql"]) == 3  # two batches, then the exact recount of order_id
         assert [c["name"] for c in result["columns"]] == ["order_id", "customer_email", "amount"]
         assert result["columns"][2]["numeric_stats"]["max"] == 99.0
 
@@ -460,7 +467,10 @@ class TestExecutedAgainstRealData:
                 continue
             exp = expected[col["name"]]
             assert col["missing"] == exp["missing"], col["name"]
-            assert col["unique"] == exp["unique"], col["name"]
+            if col["name"] in result["meta"]["exact_distinct_columns"]:
+                assert col["unique"] == exp["unique"], col["name"]
+            else:  # approximate (DuckDB's estimator here, HyperLogLog++ on BigQuery)
+                assert col["unique"] == pytest.approx(exp["unique"], rel=0.05), col["name"]
             assert col["semantic_type"] == exp["semantic_type"], col["name"]
             for key in ("boolean_stats", "string_stats"):
                 assert col[key] == exp[key], (col["name"], key)
@@ -552,7 +562,9 @@ class TestExecutedAgainstRealData:
         client.load("ri_listed", df)
         before = len(client.queries)
         result = profile_bigquery("demo.shop.ri_listed", client=client, output_html=None)
-        assert len(client.queries) - before == 1  # only the profiling query ran
+        new = client.queries[before:]
+        # profiling, then the exact recount of the possible key; no reference query ran
+        assert len(new) == 2 and new[1].startswith("SELECT\n  COUNT(DISTINCT `order_id`)")
         assert result["referential_integrity"] == []
         [sg] = result["reference_suggestions"]
         assert (sg["column"], sg["references"], sg["status"]) == ("parent_order_id", "order_id", "listed")
@@ -626,7 +638,7 @@ class TestExecutedAgainstRealData:
         capsys.readouterr()
         main()
         printed = capsys.readouterr().out
-        assert "COUNT(DISTINCT `country`) AS c0__distinct" in printed
+        assert "APPROX_COUNT_DISTINCT(`country`) AS c0__distinct" in printed
         assert "Report written" not in printed
 
 
@@ -675,3 +687,56 @@ class TestProgressAndCancel:
         with pytest.raises(SystemExit) as exc:
             main([])
         assert exc.value.code == 130 and "Interrupted." in capsys.readouterr().err
+
+
+class TestDistinctCountModes:
+    def test_keys_mode_recounts_only_possible_keys(self, warehouse):
+        client, df = warehouse
+        result = profile_bigquery("demo.shop.customers", client=client, output_html=None)
+        # customer_id: no NULLs, all unique -> recounted exactly and found as a key;
+        # email: also all unique -> recounted. Nothing else is close to unique.
+        assert result["meta"]["exact_distinct_columns"] == ["customer_id", "email"]
+        assert {"columns": ["customer_id"], "type": "single"} in result["pk_candidates"]
+        by = {c["name"]: c for c in result["columns"]}
+        assert by["customer_id"]["unique"] == len(df)
+        assert "approximate" not in " ".join(by["customer_id"]["semantic_notes"])
+        assert "approximate" in " ".join(by["country"]["semantic_notes"])
+        assert "Exact distinct counts" not in result["meta"]["sql"][0]
+        assert sum(q.startswith("SELECT\n  COUNT(DISTINCT") for q in result["meta"]["sql"]) == 1
+
+    def test_exact_and_approx_modes(self, warehouse):
+        client, _ = warehouse
+        exact = profile_bigquery("demo.shop.customers", client=client, output_html=None, distinct_counts="exact")
+        assert "COUNT(DISTINCT `country`)" in exact["meta"]["sql"][0] and len(exact["meta"]["sql"]) == 1
+        approx = profile_bigquery("demo.shop.customers", client=client, output_html=None, distinct_counts="approx")
+        assert approx["pk_candidates"] == [] and approx["meta"]["exact_distinct_columns"] == []
+        pk = next(c for c in approx["meta"]["checks"] if c["id"] == "pk")
+        assert pk["status"] == "skipped" and pk["flags"] == ["--distinct-counts", "keys"]
+
+    def test_old_keyword_still_works(self, canned):
+        assert BigQueryProfiler(client=canned, exact_distinct=False).settings.distinct_counts == "approx"
+        assert BigQueryProfiler(client=canned, exact_distinct=True).settings.distinct_counts == "exact"
+
+    def test_usage_reports_slot_time_and_shuffle(self, canned):
+        class Stage:
+            def __init__(self, shuffled):
+                self.shuffle_output_bytes = shuffled
+
+        orig = canned.query
+        def query(sql, **kw):
+            job = orig(sql, **kw)
+            job.slot_millis, job.query_plan = 2500, [Stage(1024 ** 3), Stage(512 * 1024 ** 2)]
+            return job
+        canned.query = query
+        messages = []
+        result = BigQueryProfiler(client=canned, progress=messages.append).profile(table="proj.sales.orders")
+        assert result["meta"]["usage_by_section"]["profiling"] == {
+            "queries": 2, "bytes_processed": 4096, "slot_ms": 5000, "shuffle_bytes": 3 * 1024 ** 3}
+        assert any(m.endswith("2.00 KB processed, 2.5 slot-seconds, 1.50 GB shuffled") for m in messages)
+
+    def test_unreported_usage_is_left_out_not_shown_as_zero(self, canned):
+        result = BigQueryProfiler(client=canned).profile(table="proj.sales.orders")
+        usage = result["meta"]["usage_by_section"]["profiling"]
+        assert usage["slot_ms"] is None and usage["shuffle_bytes"] is None
+        from datascope.bigquery import _usage_text
+        assert _usage_text(usage) == "4.00 KB processed"

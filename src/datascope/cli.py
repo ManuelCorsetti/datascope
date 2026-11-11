@@ -74,8 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Dry-run everything and print the bytes and approximate cost per section "
                          "(profiling, correlations, each reference check). Runs and bills nothing.")
     bq.add_argument("--print-sql", action="store_true", help="Print the SQL that would run, and exit")
-    bq.add_argument("--approx-distinct", action="store_false", dest="exact_distinct", default=argparse.SUPPRESS,
-                    help="Same as --no-exact-distinct")
+    bq.add_argument("--approx-distinct", action="store_const", const="approx", dest="distinct_counts",
+                    default=argparse.SUPPRESS, help="Same as --distinct-counts approx")
 
     groups = {}
     for key, title in GROUPS:
@@ -122,6 +122,8 @@ def _print_estimate(est: Dict[str, Any]) -> None:
     for s in est["sections"]:
         print(f"  {s['section']:<{width}}  {s['bytes_processed_human']:>10}  ${s['estimated_cost_usd']:.4f}"
               + (f"  {s['note']}" if s["note"] else ""))
+    print()
+    print(est["pricing_note"])
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -214,10 +216,12 @@ def _main(argv: Optional[List[str]] = None) -> None:
         from .run_summary import format_text
 
         meta = result["meta"]
-        if meta.get("bytes_processed_by_section"):
-            from .bigquery import format_bytes
-            parts = ", ".join(f"{k} {format_bytes(v)}" for k, v in meta["bytes_processed_by_section"].items())
-            print(f"BigQuery processed {format_bytes(meta['bytes_processed'])} ({parts}).")
+        if meta.get("usage_by_section"):
+            from .bigquery import _usage_text
+            print("BigQuery usage:")
+            for section, usage in meta["usage_by_section"].items():
+                print(f"  {section:<11} {usage['queries']} quer{'y' if usage['queries'] == 1 else 'ies'}: "
+                      + _usage_text(usage))
         print()
         print(format_text(meta))
 

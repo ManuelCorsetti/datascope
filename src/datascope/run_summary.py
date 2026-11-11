@@ -183,7 +183,7 @@ def pandas_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def bigquery_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """ctx: n_cols, n_skipped, n_numeric, declared, suggestions."""
+    """ctx: n_cols, n_skipped, n_numeric, n_exact, declared, suggestions."""
     out = [check("column_stats", "Column statistics", PARTIAL if ctx["n_skipped"] else RAN,
                  f"{_plural(ctx['n_cols'], 'column')}: nulls, distinct counts, top values, numeric/text/date stats"
                  + (f"; {ctx['n_skipped']} skipped (unsupported type)." if ctx["n_skipped"] else "."))]
@@ -197,12 +197,18 @@ def bigquery_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         correlation_check(s, ctx["n_numeric"]),
         check("missing_correlation", "Missing-value correlation", NOT_AVAILABLE, na + "."),
     ]
-    if s.exact_distinct:
-        out.append(check("pk", "Primary-key search", RAN, "Single-column keys (exact distinct counts). "
-                                                          "Composite keys are not available on this engine."))
+    composite = " Composite keys are not available on this engine."
+    if s.distinct_counts == "exact":
+        out.append(check("pk", "Primary-key search", RAN, "Single-column keys, from exact distinct counts of "
+                                                          "every column." + composite))
+    elif s.distinct_counts == "keys":
+        n = ctx.get("n_exact", 0)
+        out.append(check("pk", "Primary-key search", RAN,
+                         f"Single-column keys: approximate distinct counts first, then exact counts for the "
+                         f"{_plural(n, 'column')} that could be a key." + composite))
     else:
         out.append(check("pk", "Primary-key search", SKIPPED, "Approximate distinct counts can't prove "
-                                                              "uniqueness.", {"exact_distinct": True}))
+                                                              "uniqueness.", {"distinct_counts": "keys"}))
     out.append(check("fd", "Functional dependencies", NOT_AVAILABLE, na + "."))
     return out + reference_checks(s, BIGQUERY, ctx["declared"], ctx["suggestions"])
 

@@ -38,6 +38,13 @@ GROUPS: List[Tuple[str, str]] = [
 ]
 
 SUGGESTED_REFERENCE_MODES = ("auto", "check", "list", "off")
+DISTINCT_COUNT_MODES = ("keys", "exact", "approx")
+
+# distinct_counts="keys": a column is recounted exactly when its approximate
+# unique share is within this many percentage points of the bar a key must
+# clear (100% for a primary key, ri_parent_min_unique_pct for a reference
+# target). Comfortably above HyperLogLog++'s ~0.5% typical error.
+KEY_RECOUNT_MARGIN_PCT = 3.0
 
 
 def _s(default: Any, help: str, group: str, engines: str = BOTH, *, minimum: Optional[float] = None,
@@ -129,9 +136,14 @@ class Settings:
                                         "high-severity alert; otherwise a warning.", "ri", minimum=0, maximum=100)
 
     # ---------------------------------------------------------- bigquery
-    exact_distinct: bool = _s(True, "Exact COUNT(DISTINCT). --no-exact-distinct uses APPROX_COUNT_DISTINCT: "
-                                    "cheaper on very large tables, but disables primary-key detection.",
-                              "bigquery", BIGQUERY)
+    distinct_counts: str = _s(
+        "keys", "How distinct values are counted. 'keys': approximate counts (HyperLogLog++, about 1%% error) "
+                "for every column, then exact counts only for columns that could be keys (no NULLs and nearly "
+                "all values unique), in a second query that reads just those columns. Key and reference "
+                "detection stay exact, without the heavy shuffle (slot time) of an exact COUNT(DISTINCT) on "
+                "every column. 'exact': exact counts for every column, the heaviest on slots. 'approx': "
+                "approximate only, the lightest; primary-key detection is then off.",
+        "bigquery", BIGQUERY, choices=DISTINCT_COUNT_MODES)
     max_columns_per_query: int = _s(100, "Split wide tables into profiling queries of at most this many columns.",
                                     "bigquery", BIGQUERY, minimum=1)
 
@@ -220,8 +232,12 @@ def default_of(name: str) -> Any:
 
 def resolve(settings: Optional[Settings], overrides: Dict[str, Any]) -> Settings:
     """Settings from an optional base plus keyword overrides. Accepts the
-    pre-Settings keyword `suggest_references=True/False` too."""
+    older keywords `suggest_references=True/False` and
+    `exact_distinct=True/False` (= distinct_counts "exact" / "approx")."""
     overrides = dict(overrides)
+    if "exact_distinct" in overrides:
+        flag = overrides.pop("exact_distinct")
+        overrides.setdefault("distinct_counts", "exact" if flag else "approx")
     if "suggest_references" in overrides:
         flag = overrides.pop("suggest_references")
         overrides.setdefault("suggested_references", "auto" if flag else "off")

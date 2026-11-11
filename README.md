@@ -153,22 +153,30 @@ dollar figure is only bytes x `price_per_tib_usd`: it ignores the
 monthly free tier, regional price differences, and doesn't apply if you
 pay for capacity (slots) rather than on-demand.
 
-**What the BigQuery engine computes** — in one scan of the source:
+**What the BigQuery engine computes**, in one scan of the source:
 total rows; per column nulls, distinct count and top values; numeric
 min / max / mean / std / sum / quartiles (median), zeros, negatives;
 string length stats and blank count; date range, future-dated values and
 weekday split; boolean true/false split. Semantic types, quality rules,
 dbt snippets, single-column primary-key candidates and alerts are
 derived from those, as usual. Pearson correlations between numeric
-columns come from `CORR()` in the same scan.
+columns come from `CORR()` in the same scan. A second, small query then
+counts distinct values exactly for the few columns that could be keys
+(see distinct counts below).
 
 **Things to know**
 
 - Quartiles/median use `APPROX_QUANTILES` and top values use
-  `APPROX_TOP_COUNT`, so they are approximate on large tables. Distinct
-  counts are exact by default; pass `exact_distinct=False`
-  (`--approx-distinct`) to switch to `APPROX_COUNT_DISTINCT` on very
-  large tables.
+  `APPROX_TOP_COUNT`, so they are approximate on large tables.
+- **Distinct counts** (`--distinct-counts`): by default (`keys`) the
+  profiling query uses `APPROX_COUNT_DISTINCT` for every column, then a
+  second query counts exactly only the columns that could be keys: no
+  NULLs and nearly all values unique. An exact `COUNT(DISTINCT)` on every
+  column makes BigQuery move (shuffle) each column's values between stages
+  once per column, which on a ~150 MB table showed up as 5+ GB shuffled.
+  That costs nothing extra on on-demand pricing, but it is slot time on
+  capacity pricing. `exact` restores exact counts everywhere; `approx`
+  skips the second query and turns primary-key detection off.
 - Pearson correlations between numeric columns are computed with `CORR()`
   in the first profiling query (first `max_correlation_cols=30` numeric
   columns). That query already reads every numeric column of a table of
@@ -201,9 +209,16 @@ columns come from `CORR()` in the same scan.
 - Personal & sensitive data is detected by **column name only**: checking
   values would mean pulling them out of the warehouse.
 - Cost: a table is scanned once (wide tables are split into queries of
-  `max_columns_per_query=100` columns; each column is still read once).
-  A SQL query source is re-run for each of those batches. Use
-  `maximum_bytes_billed=` (`--max-bytes-billed`) as a safety cap.
+  `max_columns_per_query=100` columns; each column is still read once),
+  plus the small exact-count and reference queries. A SQL query source is
+  re-run for each query. Use `maximum_bytes_billed=` (`--max-bytes-billed`)
+  as a safety cap.
+- **On-demand vs slot pricing.** `--estimate` prices bytes processed, which
+  is what on-demand pricing bills. If your organisation pays for slots
+  (capacity pricing), you are billed for slot time instead, which a dry run
+  can't predict. Every run reports, per query and in total, the bytes
+  processed, the slot time and the bytes shuffled (as the console's job
+  details show them), so you can compare settings with real numbers.
 - A column whose type datascope doesn't recognise is **skipped, not
   guessed at**: the rest of the table is still profiled, and the skip is
   reported as a warning in the report's Alerts panel, on stderr from the
@@ -326,7 +341,7 @@ from Python rather than a file, the command uses an `INPUT` placeholder.
 
 | Flag / keyword | Default | Engines | What it does |
 |---|---|---|---|
-| `--exact-distinct` / `exact_distinct` | `on` | BigQuery | Exact COUNT(DISTINCT). --no-exact-distinct uses APPROX_COUNT_DISTINCT: cheaper on very large tables, but disables primary-key detection. |
+| `--distinct-counts` / `distinct_counts` | `keys` | BigQuery | How distinct values are counted. 'keys': approximate counts (HyperLogLog++, about 1% error) for every column, then exact counts only for columns that could be keys (no NULLs and nearly all values unique), in a second query that reads just those columns. Key and reference detection stay exact, without the heavy shuffle (slot time) of an exact COUNT(DISTINCT) on every column. 'exact': exact counts for every column, the heaviest on slots. 'approx': approximate only, the lightest; primary-key detection is then off. |
 | `--max-columns-per-query` / `max_columns_per_query` | `100` | BigQuery | Split wide tables into profiling queries of at most this many columns. |
 <!-- settings-table:end -->
 

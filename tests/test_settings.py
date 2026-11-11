@@ -41,7 +41,7 @@ class TestSettings:
 
     def test_flags_round_trip_through_the_cli_parser(self):
         s = Settings(correlations=False, max_correlation_cols=45, ri_parent_min_unique_pct=90.5,
-                     suggested_references="list", exact_distinct=False)
+                     suggested_references="list", distinct_counts="approx")
         args = build_parser().parse_args(["x.csv"] + s.flags_for())
         given = {f.name: getattr(args, f.name) for f, _ in iter_fields() if hasattr(args, f.name)}
         assert Settings(**given) == s
