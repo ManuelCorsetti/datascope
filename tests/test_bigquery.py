@@ -637,3 +637,41 @@ def test_cli_requires_exactly_one_source(monkeypatch):
     monkeypatch.setattr("sys.argv", ["datascope"])
     with pytest.raises(SystemExit):
         main()
+
+
+class TestProgressAndCancel:
+    def test_progress_reports_each_query_with_job_id_time_and_bytes(self, canned):
+        messages = []
+        BigQueryProfiler(client=canned, progress=messages.append).profile(table="proj.sales.orders")
+        assert messages[0] == "Reading the schema of proj.sales.orders ..."
+        assert messages[1] == "Profiling 3 columns in 1 query."
+        assert messages[2] == "Profiling query 1/1: running ..."
+        assert messages[3].startswith("Profiling query 1/1: done in ") and messages[3].endswith("2.00 KB processed")
+
+    def test_interrupt_cancels_the_running_job(self, canned):
+        cancelled = []
+
+        class SlowJob:
+            job_id = "job_123"
+            total_bytes_processed = 0
+
+            def result(self):
+                raise KeyboardInterrupt
+
+            def cancel(self):
+                cancelled.append(self.job_id)
+
+        canned.query = lambda sql, **kw: SlowJob()
+        messages = []
+        with pytest.raises(KeyboardInterrupt):
+            BigQueryProfiler(client=canned, progress=messages.append).profile(table="proj.sales.orders")
+        assert cancelled == ["job_123"]
+        assert "cancelling job job_123" in messages[-1]
+
+    def test_cli_exits_cleanly_on_interrupt(self, monkeypatch, capsys):
+        def boom(argv):
+            raise KeyboardInterrupt
+        monkeypatch.setattr("datascope.cli._main", boom)
+        with pytest.raises(SystemExit) as exc:
+            main([])
+        assert exc.value.code == 130 and "Interrupted." in capsys.readouterr().err

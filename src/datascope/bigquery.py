@@ -34,10 +34,11 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import warnings
 from datetime import date, datetime, timezone
 from itertools import combinations
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -327,6 +328,11 @@ class BigQueryProfiler:
     profiling query, plausible same-table references are listed with the
     cost of checking each (a free dry run), but not run. Declared
     `references` always run.
+
+    progress : callable(str), optional
+        Called with a line of text as each step starts and finishes
+        (query started with its job ID, then time and bytes processed).
+        The CLI prints these to stderr.
     """
 
     def __init__(
@@ -336,9 +342,11 @@ class BigQueryProfiler:
         location: Optional[str] = None,
         maximum_bytes_billed: Optional[int] = None,
         settings: Optional[Settings] = None,
+        progress: Optional[Callable[[str], None]] = None,
         **kwargs: Any,
     ):
         self.settings = resolve(settings, kwargs)
+        self.progress = progress
         self._client = client
         self.project = project
         self.location = location
@@ -383,6 +391,33 @@ class BigQueryProfiler:
         if self.location:
             kwargs["location"] = self.location
         return self.client.query(sql, **kwargs)
+
+    def _say(self, message: str) -> None:
+        if self.progress is not None:
+            self.progress(message)
+
+    def _run_logged(self, sql: str, what: str) -> Tuple[Any, List[Any]]:
+        """Run a query and wait for it, reporting start (with the job ID,
+        to find it in the console) and finish (time, bytes processed)."""
+        started = time.monotonic()
+        job = self._run(sql)
+        job_id = getattr(job, "job_id", None)
+        self._say(f"{what}: running" + (f" (job {job_id})" if job_id else "") + " ...")
+        try:
+            rows = list(job.result())
+        except KeyboardInterrupt:
+            # Stopping the program doesn't stop the job: BigQuery would
+            # keep running (and billing) it. Cancel it on the way out.
+            if hasattr(job, "cancel"):
+                self._say(f"{what}: interrupted, cancelling job {job_id or ''} ...")
+                try:
+                    job.cancel()
+                except Exception as exc:  # pragma: no cover - best effort
+                    self._say(f"Could not cancel job {job_id}: {exc}. Cancel it in the BigQuery console.")
+            raise
+        nbytes = int(getattr(job, "total_bytes_processed", None) or 0)
+        self._say(f"{what}: done in {time.monotonic() - started:.1f}s, {format_bytes(nbytes)} processed")
+        return job, rows
 
     def _can_dry_run(self) -> bool:
         return self._job_config(dry_run=True) is not None
@@ -625,14 +660,16 @@ class BigQueryProfiler:
         ("customer_id") or of another table
         ("project.dataset.customers.id")."""
         st = self.settings
+        self._say(f"Reading the schema of {table or 'the query'} ...")
         plan = self._plan(table, query, columns, references)
         fields, sqls, skipped = plan.fields, plan.sqls, plan.skipped
+        self._say(f"Profiling {len(fields)} columns in {len(sqls)} quer{'y' if len(sqls) == 1 else 'ies'}"
+                  + (f", then {len(plan.ref_checks)} reference check(s)" if plan.ref_checks else "") + ".")
 
         row: Dict[str, Any] = {}
         bytes_profiling = 0
-        for sql in sqls:
-            job = self._run(sql)
-            rows = list(job.result())
+        for i, sql in enumerate(sqls, 1):
+            job, rows = self._run_logged(sql, f"Profiling query {i}/{len(sqls)}")
             row.update(dict(rows[0].items()) if rows else {})
             bytes_profiling += int(getattr(job, "total_bytes_processed", None) or 0)
 
@@ -673,6 +710,8 @@ class BigQueryProfiler:
                 if i >= st.max_reference_suggestions:
                     reference_suggestions.append(suggestion_entry(child, parent, "over_limit"))
                 elif mode == "list":
+                    if can_price:
+                        self._say(f"Pricing suggested reference {child} -> {parent} (free dry run) ...")
                     price = self._dry_run_bytes(chk.sql) if can_price else None
                     reference_suggestions.append(suggestion_entry(child, parent, "listed", price))
                 else:
@@ -753,8 +792,8 @@ class BigQueryProfiler:
         return output_path
 
     def _run_reference(self, chk: _RefCheck, child: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
-        job = self._run(chk.sql)
-        rows = [dict(r.items()) for r in job.result()]
+        job, raw = self._run_logged(chk.sql, f"Reference check {chk.child} -> {chk.label}")
+        rows = [dict(r.items()) for r in raw]
         rows = [r for r in rows if r.get("value") is not None]
         result = build_result(
             chk.child, chk.label, chk.source, chk.same_table,

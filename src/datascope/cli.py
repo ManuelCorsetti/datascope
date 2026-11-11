@@ -58,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Output HTML path (default: data_profile_report.html)")
     out.add_argument("--name", default=None, help="Source name shown in the report (default: the file or table name)")
     out.add_argument("--open", action="store_true", help="Open the report in your browser when done")
-    out.add_argument("--quiet", action="store_true", help="Don't print the run summary")
+    out.add_argument("--quiet", action="store_true", help="Don't print progress or the run summary")
 
     bq = parser.add_argument_group(
         "BigQuery source", "Profile inside BigQuery instead of loading a file (needs the 'bigquery' extra).")
@@ -99,6 +99,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _progress(message: str) -> None:
+    # stderr, flushed: shows up immediately even where stdout is buffered
+    # (e.g. Git Bash on Windows), and doesn't mix into piped output.
+    print(message, file=sys.stderr, flush=True)
+
+
 def _settings_from(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Settings:
     given = {f.name: getattr(args, f.name) for f, _ in iter_fields() if hasattr(args, f.name)}
     try:
@@ -119,6 +125,14 @@ def _print_estimate(est: Dict[str, Any]) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> None:
+    try:
+        _main(argv)
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr, flush=True)
+        sys.exit(130)
+
+
+def _main(argv: Optional[List[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     settings = _settings_from(args, parser)
@@ -142,7 +156,8 @@ def main(argv: Optional[List[str]] = None) -> None:
                 query = fh.read()
         columns = [c.strip() for c in args.columns.split(",") if c.strip()] if args.columns else None
         profiler = BigQueryProfiler(project=args.bq_project, location=args.bq_location,
-                                    maximum_bytes_billed=args.max_bytes_billed, settings=settings)
+                                    maximum_bytes_billed=args.max_bytes_billed, settings=settings,
+                                    progress=None if args.quiet else _progress)
         # Surface skipped-column warnings as plain lines on stderr.
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -185,6 +200,8 @@ def main(argv: Optional[List[str]] = None) -> None:
                 resolved[child] = (parent, other[column])  # label as typed, so the run can be repeated
             else:
                 resolved[child] = parent
+        if not args.quiet:
+            _progress(f"Loading and profiling {args.input} ...")
         try:
             result = profile(args.input, output_html=args.output, source_name=args.name, open_browser=args.open,
                              references=resolved, settings=settings)
