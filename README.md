@@ -198,8 +198,8 @@ columns come from `CORR()` in the same scan.
 - Not computed yet (each needs extra passes over the data): histograms,
   outlier counts, skew/kurtosis, duplicate rows, composite
   keys, functional dependencies, and detecting dates stored as text.
-- PII/PHI detection is by **column name only** — content checks would
-  mean pulling values out of the warehouse.
+- Personal & sensitive data is detected by **column name only**: checking
+  values would mean pulling them out of the warehouse.
 - Cost: a table is scanned once (wide tables are split into queries of
   `max_columns_per_query=100` columns; each column is still read once).
   A SQL query source is re-run for each of those batches. Use
@@ -245,7 +245,7 @@ command line prints, and the report's **Run summary** panel shows:
 ```
 Checks:
   ✓ Column statistics                  ran           All 19 columns: nulls, distinct counts, ...
-  ◐ PII/PHI content checks             partial       Values sampled: 500 rows per column (largest column has 4,012). ...  → --sample-size 4012
+  ◐ Personal & sensitive data detection  partial    Column names checked; values checked on a sample of 500 rows per column ...  → --sample-size 4012
   ◐ Correlations                       partial       First 3 of 5 numeric columns.  → --max-correlation-cols 5
   ✓ Primary-key search                 ran           No key can be unique: the table has 12 exact duplicate rows.
   · Referential integrity (declared)   not set up    None declared.  (set up with --reference CHILD=PARENT ...)
@@ -271,7 +271,7 @@ from Python rather than a file, the command uses an `INPUT` placeholder.
 |---|---|---|---|
 | `--top-n-values` / `top_n_values` | `10` | both | Most frequent values kept per column. |
 | `--histogram-bins` / `histogram_bins` | `30` | pandas | Bars in each numeric histogram. |
-| `--sample-size` / `sample_size_for_content_checks` | `1000` | pandas | Rows sampled per column for PII/PHI content checks (regex on values). Larger = slower, fewer misses. |
+| `--sample-size` / `sample_size_for_content_checks` | `1000` | pandas | Rows sampled per column when checking values for personal or sensitive data (emails, phone numbers, ID and card numbers...). Larger = slower, fewer misses. |
 | `--random-state` / `random_state` | `42` | pandas | Seed for that sample, so reruns flag the same columns. |
 
 **Alert thresholds**
@@ -281,7 +281,7 @@ from Python rather than a file, the command uses an `INPUT` placeholder.
 | `--missing-warning-pct` / `missing_warning_pct` | `20` | both | A column with more than this % missing raises a warning. |
 | `--missing-high-pct` / `missing_high_pct` | `50` | both | A column with more than this % missing raises a high-severity alert. |
 | `--outlier-alert-pct` / `outlier_alert_pct` | `5` | pandas | Alert when more than this % of a numeric column is outside 1.5x IQR. |
-| `--sensitive-alert-min-confidence` / `sensitive_alert_min_confidence` | `0.7` | both | Alert on a sensitive (PII/PHI/PCI) column only at or above this detection confidence (0-1). Columns below it are still flagged and masked, just without an alert. |
+| `--sensitive-alert-min-confidence` / `sensitive_alert_min_confidence` | `0.7` | both | Raise an alert for a column that looks like personal or sensitive data only at or above this detection confidence (0-1). Columns below it are still flagged and masked, just without an alert. |
 
 **Correlations**
 
@@ -345,7 +345,7 @@ report records the datascope version, which pins them.
   otherwise free text; average length > 80 characters → free text;
   ≤ 50 distinct values or < 10% unique → categorical; otherwise
   high-cardinality text.
-- **PII/PHI/PCI detection** (`pii.py`): a column is flagged when its name
+- **Personal & sensitive data detection** (`pii.py`, see above): a column is flagged when its name
   matches a keyword list, or when ≥ 60% of the sampled values match a
   pattern (email, phone, national ID, IP address, credit card with a Luhn
   check, IBAN). Its confidence is 0.55 for a name match plus 0.5 × the
@@ -374,11 +374,18 @@ report records the datascope version, which pins them.
   numeric, free text, boolean, datetime (including dates stored as
   text), driven mainly by how *unique* the column is relative to row
   count, with dtype and column-name hints layered on top.
-- **PII / PHI / PCI detection** — combines column-name keyword matching
-  with sampled content regex (email, phone, national ID, IP, credit card
-  with a Luhn check, IBAN). Flagged values are masked everywhere in the
-  report, including drill-down samples. Heuristic — review before making
-  access-control decisions on it.
+- **Personal & sensitive data detection**: flags columns that look like
+  they hold *personal data* (PII, personally identifiable information:
+  names, email addresses, phone numbers, postal addresses, national ID
+  numbers, dates of birth), *health data* (PHI: medical records,
+  diagnoses, medication) or *payment data* (PCI: card and bank account
+  numbers). It checks the column name, and a sample of values against
+  patterns (email, phone, national ID, IP address, credit card with a
+  Luhn checksum, IBAN). The report's "Personal & sensitive data" panel
+  lists each flagged column with the reason, e.g. "98% of 1,000 sampled
+  values have the format of an email address", and the values of flagged
+  columns are masked everywhere in the report. It is pattern matching to
+  point you at columns worth a review, not a compliance decision.
 - **Data quality rule suggestions** — not-null, uniqueness, accepted
   values, range checks, outlier/negative/future-date flags — plus a
   ready-to-paste **dbt `schema.yml`** test block per column.
@@ -407,7 +414,7 @@ report records the datascope version, which pins them.
   standard governance term "PSI", so this treats it as PHI (Protected
   Health Information), the usual pairing with PII. Categories are plain
   data in `pii.py` — easy to rename or extend if something else was meant.
-- Content-based PII/PHI checks sample up to 1,000 rows per column by
+- Value checks for personal data sample up to 1,000 rows per column by
   default (`DataProfiler(sample_size_for_content_checks=...)` to change).
 - Every suggestion (quality rules, dbt tests, accepted-value lists) is a
   heuristic starting point learned from one snapshot of the data — review
@@ -422,7 +429,7 @@ src/datascope/
   core.py          DataProfiler class, orchestration, correlations, PK search
   stats.py         numeric/string/datetime/boolean stat + histogram calculators
   semantic.py      semantic type inference
-  pii.py           PII/PHI/PCI detection + value masking
+  pii.py           personal & sensitive data detection (PII/PHI/PCI) + value masking
   quality.py       quality-rule + dbt-snippet recommendations
   relationships.py functional dependency detection (column A -> column B)
   referential.py   referential-integrity checks (declared and suggested references)

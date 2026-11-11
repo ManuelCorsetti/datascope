@@ -55,8 +55,9 @@ class Settings:
     top_n_values: int = _s(10, "Most frequent values kept per column.", "general", minimum=0)
     histogram_bins: int = _s(30, "Bars in each numeric histogram.", "general", PANDAS, minimum=1)
     sample_size_for_content_checks: int = _s(
-        1000, "Rows sampled per column for PII/PHI content checks (regex on values). Larger = slower, "
-              "fewer misses.", "general", PANDAS, minimum=1, flag="--sample-size")
+        1000, "Rows sampled per column when checking values for personal or sensitive data (emails, phone "
+              "numbers, ID and card numbers...). Larger = slower, fewer misses.", "general", PANDAS, minimum=1,
+        flag="--sample-size")
     random_state: int = _s(42, "Seed for that sample, so reruns flag the same columns.", "general", PANDAS)
 
     # ------------------------------------------------------------ alerts
@@ -67,8 +68,8 @@ class Settings:
     outlier_alert_pct: float = _s(5.0, "Alert when more than this %% of a numeric column is outside 1.5x IQR.",
                                   "alerts", PANDAS, minimum=0, maximum=100)
     sensitive_alert_min_confidence: float = _s(
-        0.7, "Alert on a sensitive (PII/PHI/PCI) column only at or above this detection confidence (0-1). "
-             "Columns below it are still flagged and masked, just without an alert.",
+        0.7, "Raise an alert for a column that looks like personal or sensitive data only at or above this "
+             "detection confidence (0-1). Columns below it are still flagged and masked, just without an alert.",
         "alerts", minimum=0, maximum=1)
 
     # ------------------------------------------------------ correlations

@@ -161,7 +161,7 @@ section { margin-bottom: 22px; }
 .kpi-link:hover { transform: translateY(-2px); border-color: var(--teal); }
 .kpi-link-arrow { position: absolute; top: 14px; right: 14px; color: var(--text-faint); transition: color .15s ease, transform .15s ease; }
 .kpi-link:hover .kpi-link-arrow, .kpi-link:focus-visible .kpi-link-arrow { color: var(--teal); transform: translateY(2px); }
-#dq-section, #columns-section { scroll-margin-top: 76px; }
+#dq-section, #columns-section, #sensitive-panel { scroll-margin-top: 76px; }
 @keyframes flash { from { box-shadow: 0 0 0 3px var(--teal); } to { box-shadow: 0 0 0 3px transparent; } }
 .flash { animation: flash 1.4s ease-out; border-radius: var(--radius); }
 .kpi-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
@@ -236,6 +236,19 @@ table.heatmap th { padding: 4px 6px; }
   color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
 .ri-detail { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
 .ri-detail code { font-family: var(--font-mono); color: var(--text); }
+.sens-intro { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; max-width: 900px; }
+.sens-intro b { color: var(--text); font-weight: 500; }
+.sens-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sens-table th { text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-faint); padding: 6px 12px 6px 0; }
+.sens-table td { padding: 8px 12px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.sens-kind { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+  color: var(--violet); background: var(--violet-soft); padding: 2px 7px; border-radius: 4px; }
+.sens-why { color: var(--text-muted); }
+.sens-conf { font-family: var(--font-mono); white-space: nowrap; }
+.sens-conf .panel-sub { display: block; font-family: var(--font-sans); }
+.detail-why { font-size: 13px; color: var(--text-muted); margin-top: 6px; max-width: 640px; }
+.detail-why b { color: var(--violet); font-weight: 500; }
 .run-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -6px 0 22px; padding: 10px 14px;
   background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: var(--radius-sm); font-size: 13px; }
 .run-strip a { color: var(--teal); font-weight: 500; text-decoration: none; }
@@ -406,6 +419,11 @@ details.settings summary { cursor: pointer; font-family: var(--font-mono); font-
     </div>
   </section>
 
+  <section class="panel" id="sensitive-panel" hidden>
+    <div class="panel-title"><span class="material-symbols-outlined icon">shield_person</span>Personal &amp; sensitive data <span class="panel-sub">columns that look like they identify people, or hold health or payment data</span></div>
+    <div id="sensitive-body"></div>
+  </section>
+
   <section class="two-col">
     <div class="panel">
       <div class="panel-title"><span class="material-symbols-outlined icon">category</span>Type distribution</div>
@@ -470,7 +488,7 @@ details.settings summary { cursor: pointer; font-family: var(--font-mono); font-
   <div id="detail-content"></div>
 </main>
 
-<footer class="footer"><span class="material-symbols-outlined icon icon-sm" style="vertical-align:-2px">lock</span> Sensitive values are masked throughout. Type and quality-rule suggestions are heuristic &mdash; verify before enforcing.</footer>
+<footer class="footer"><span class="material-symbols-outlined icon icon-sm" style="vertical-align:-2px">lock</span> Values in columns that look like personal or sensitive data are masked throughout. Type and quality-rule suggestions are heuristic &mdash; verify before enforcing.</footer>
 
 <script>
 const PROFILE = __PROFILE_DATA_JSON__;
@@ -616,7 +634,7 @@ function renderHero() {
   const tiles = [
     {label: 'Rows', value: fmtInt(m.n_rows), iconName: 'table_rows', color: 'var(--teal)'},
     {label: 'Columns', value: fmtInt(m.n_cols), iconName: 'view_column', color: 'var(--teal)', link: nCols > 0 ? 'columns' : null},
-    {label: 'Sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)', link: o.sensitive_columns_count > 0 ? 'sensitive' : null},
+    {label: 'Personal & sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield_person', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)', link: 'sensitive'},
     {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '—' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
   ];
   const grid = document.getElementById('kpi-grid');
@@ -690,7 +708,7 @@ const KPI_LINKS = {
   columns:   {hint: 'Show all columns',                 go: () => { setColumnView({}); jumpTo('columns-section'); }},
   missing:   {hint: 'Show columns sorted by missing %', go: () => { setColumnView({sort: 'missing'}); jumpTo('columns-section'); }},
   constant:  {hint: 'Show only constant columns',       go: () => { setColumnView({types: ['constant']}); jumpTo('columns-section'); }},
-  sensitive: {hint: 'Show only sensitive columns',      go: () => { setColumnView({sensitiveOnly: true}); jumpTo('columns-section'); }},
+  sensitive: {hint: 'What was flagged, and why',         go: () => jumpTo('sensitive-panel')},
 };
 
 function setColumnView(opts) {
@@ -846,6 +864,44 @@ function renderReferentialIntegrity() {
   wireTooltips(list);
 }
 
+// Plain-language labels; older profiles only have the PII/PHI/PCI codes.
+const SENS_GROUP = {PII: 'Personal data', PHI: 'Health data', PCI: 'Payment data'};
+function sensGroup(sv) { return sv.category_label || SENS_GROUP[sv.category] || sv.category || 'Sensitive data'; }
+function sensType(sv) { return sv.type_label || String(sv.type || '').replace(/_/g, ' '); }
+function sensLabel(sv) { return sensGroup(sv) + ': ' + sensType(sv); }
+
+function renderSensitive() {
+  const cols = (PROFILE.columns || []).filter(c => c.sensitive && c.sensitive.is_sensitive)
+    .sort((a,b) => b.sensitive.confidence - a.sensitive.confidence);
+  const minConf = setting('sensitive_alert_min_confidence', 0.7);
+  const bq = PROFILE.meta.engine === 'bigquery';
+  let html = '<p class="sens-intro">datascope checks every column\u2019s <b>name</b>' +
+    (bq ? '' : ' and a <b>sample of its values</b>') + ' for <b>personal data</b> (PII: names, email addresses, phone numbers, ' +
+    'postal addresses, ID numbers, dates of birth), <b>health data</b> (PHI: medical records, diagnoses, medication) and ' +
+    '<b>payment data</b> (PCI: card and bank account numbers). Values in flagged columns are <b>masked everywhere in this report</b>. ' +
+    'This is pattern matching to point you at columns worth a review, not a compliance decision.' +
+    (bq ? ' On BigQuery only column names are checked: checking values would mean pulling them out of the warehouse.' : '') + '</p>';
+  if (!cols.length) {
+    html += '<div class="empty-state">' + icon('check_circle', 'sm') + ' No column looks like personal or sensitive data.</div>';
+  } else {
+    html += '<table class="sens-table"><thead><tr><th>Column</th><th>Kind</th><th>Looks like</th><th>Why</th><th>Confidence</th></tr></thead><tbody>' +
+      cols.map(c => {
+        const sv = c.sensitive;
+        const alerted = sv.confidence >= minConf;
+        return '<tr><td><button type="button" class="alert-col-link" data-open-col="' + esc(c.name) + '" title="Open column details">' + esc(c.name) + '</button></td>' +
+          '<td><span class="sens-kind">' + esc(sensGroup(sv)) + '</span></td>' +
+          '<td>' + esc(sensType(sv)) + '</td>' +
+          '<td class="sens-why">' + esc((sv.reasons || []).join(' ') || ((sv.detected_by || []).join(', ').replace(/_/g, ' '))) + '</td>' +
+          '<td class="sens-conf">' + Math.round(sv.confidence * 100) + '%<span class="panel-sub">' +
+            (alerted ? 'alert raised' : 'below the alert threshold (' + Math.round(minConf * 100) + '%)') + '</span></td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+  const body = document.getElementById('sensitive-body');
+  body.innerHTML = html;
+  body.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  document.getElementById('sensitive-panel').hidden = false;
+}
+
 const SETTINGS_DOC = __SETTINGS_DOC_JSON__;
 function setting(name, fallback) {
   const s = PROFILE.meta && PROFILE.meta.settings;
@@ -933,7 +989,7 @@ function renderFilterChips() {
   const types = Object.keys(dist).sort((a,b) => dist[b]-dist[a]);
   const sensCount = PROFILE.overview.sensitive_columns_count;
   let html = '';
-  if (sensCount > 0) html += '<button class="chip chip-sensitive" data-filter-sensitive="1">Sensitive <span class="chip-count">' + sensCount + '</span></button>';
+  if (sensCount > 0) html += '<button class="chip chip-sensitive" data-filter-sensitive="1">Personal &amp; sensitive <span class="chip-count">' + sensCount + '</span></button>';
   html += types.map(t => '<button class="chip" data-filter-type="' + esc(t) + '">' + esc(titleCase(t)) + ' <span class="chip-count">' + dist[t] + '</span></button>').join('');
   document.getElementById('filter-chips').innerHTML = html;
   document.querySelectorAll('[data-filter-type]').forEach(btn => btn.addEventListener('click', () => {
@@ -977,7 +1033,7 @@ function renderColumnGrid() {
       '<div class="col-card-head">' +
         '<span class="col-glyph">' + icon(TYPE_ICON[c.semantic_type]||'help', 'xl', 'color:' + (TYPE_COLOR[c.semantic_type]||'var(--text-muted)'), true) + '</span>' +
         '<span class="col-name" title="' + esc(c.name) + '">' + esc(c.name) + '</span>' +
-        (c.sensitive.is_sensitive ? '<span class="material-symbols-outlined icon icon-sm sens-icon" title="Flagged ' + esc(c.sensitive.category) + '">lock</span>' : '') +
+        (c.sensitive.is_sensitive ? '<span class="material-symbols-outlined icon icon-sm sens-icon" title="' + esc(sensLabel(c.sensitive)) + '">lock</span>' : '') +
       '</div>' +
       '<div class="col-type-label">' + esc(titleCase(c.semantic_type)) + ' \u00b7 ' + esc(c.dtype) + '</div>' +
       renderBars(spec, 'sm') +
@@ -1055,8 +1111,11 @@ function renderDetail(col) {
     '<div class="detail-badges">' +
       '<span class="badge" style="--badge-color:' + (TYPE_COLOR[col.semantic_type]||'var(--text-muted)') + ';--badge-bg:' + softBg(TYPE_COLOR[col.semantic_type]||'var(--text-muted)') + '">' + esc(titleCase(col.semantic_type)) + ' \u00b7 ' + Math.round(col.semantic_type_confidence*100) + '%</span>' +
       '<span class="badge">' + esc(col.dtype) + '</span>' +
-      (col.sensitive.is_sensitive ? '<span class="badge" style="--badge-color:var(--violet);--badge-bg:var(--violet-soft)">' + esc(col.sensitive.category) + ' \u00b7 ' + esc(titleCase(col.sensitive.type)) + ' \u00b7 ' + Math.round(col.sensitive.confidence*100) + '%</span>' : '') +
+      (col.sensitive.is_sensitive ? '<span class="badge" style="--badge-color:var(--violet);--badge-bg:var(--violet-soft)">' + esc(sensLabel(col.sensitive)) + ' \u00b7 ' + Math.round(col.sensitive.confidence*100) + '% confidence</span>' : '') +
     '</div>' +
+    (col.sensitive.is_sensitive ? '<p class="detail-why"><b>Why it looks like ' + esc(sensGroup(col.sensitive).toLowerCase()) + ':</b> ' +
+      esc((col.sensitive.reasons || []).join(' ') || 'Flagged by ' + (col.sensitive.detected_by || []).join(' and ').replace(/_/g, ' ') + '.') +
+      ' Its values are masked in this report.</p>' : '') +
     (col.semantic_notes && col.semantic_notes.length ? '<p class="detail-note">' + col.semantic_notes.map(esc).join(' ') + '</p>' : '') +
   '</div>');
 
@@ -1103,6 +1162,7 @@ document.getElementById('back-btn').addEventListener('click', showDashboard);
 renderHeader();
 renderHero();
 renderQuality();
+renderSensitive();
 renderTypeDistribution();
 renderCorrelation();
 renderMissingCorr();

@@ -359,7 +359,7 @@ class DataProfiler:
                                 "message": "Dates stored as text — consider casting to a real datetime type."})
             if c["sensitive"]["is_sensitive"] and c["sensitive"]["confidence"] >= st.sensitive_alert_min_confidence:
                 alerts.append({"severity": "sensitive", "column": c["name"],
-                                "message": f"Likely {c['sensitive']['category']} ({c['sensitive']['type']}) — review access controls."})
+                                "message": f"Looks like {_sensitive_phrase(c['sensitive'])}: review who can access it."})
             ns = c.get("numeric_stats")
             if ns and ns.get("outlier_pct", 0) > st.outlier_alert_pct:
                 alerts.append({"severity": "info", "column": c["name"],
@@ -410,3 +410,10 @@ def _reference_arg(child: str, ref: Any) -> Optional[str]:
     if isinstance(ref, tuple) and ":" in str(ref[0]):
         return f"{child}={ref[0]}"  # the CLI's own PATH:COLUMN label
     return f"{child}=PATH:COLUMN"
+
+
+def _sensitive_phrase(sensitive: Dict[str, Any]) -> str:
+    """'personal data (email address)' for alerts and rules."""
+    group = sensitive.get("category_label") or sensitive.get("category") or "sensitive data"
+    kind = sensitive.get("type_label") or str(sensitive.get("type") or "").replace("_", " ")
+    return f"{group[0].lower() + group[1:]} ({kind})" if kind else group

@@ -17,6 +17,11 @@ def _name_implies_nonnegative(name: str) -> bool:
     return any(k in n for k in _NONNEG_KEYWORDS)
 
 
+def _sensitive_phrase(sensitive: Dict[str, Any]) -> str:
+    from .core import _sensitive_phrase as phrase
+    return phrase(sensitive)
+
+
 def recommend_rules(col: Dict[str, Any]) -> List[Dict[str, Any]]:
     rules: List[Dict[str, Any]] = []
     name = col["name"]
@@ -72,7 +77,7 @@ def recommend_rules(col: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     if col["sensitive"]["is_sensitive"]:
         rules.append({"type": "access_control", "severity": "sensitive",
-                       "description": f"Flagged as likely {col['sensitive']['category']} ({col['sensitive']['type']}) — apply masking or row-level access controls."})
+                       "description": f"Looks like {_sensitive_phrase(col['sensitive'])}: apply masking or row-level access controls."})
 
     return rules
 

@@ -1,5 +1,15 @@
 """
-Heuristic sensitive-data detection: PII, PHI, PCI/financial.
+Heuristic detection of personal and sensitive data in columns:
+
+* PII — personally identifiable information: names, emails, phone
+  numbers, addresses, national ID numbers, dates of birth, ...
+* PHI — personal health information: medical record numbers, diagnoses,
+  medications, health-insurance IDs.
+* PCI — payment data: credit card and bank account numbers.
+
+The report calls these "personal & sensitive data" and shows the plain
+labels below (GROUP_LABELS / TYPE_LABELS) plus the reasons a column was
+flagged; the acronyms stay in the profile dict for programmatic use.
 
 Two independent signals are combined into one confidence score per column:
   1. Column NAME matched against curated keyword patterns per category.
@@ -46,12 +56,14 @@ NAME_PATTERNS: Dict[str, Tuple[str, List[str]]] = {
                            _w("client_?name"), _w("contact_?name"), _w("given_?name")]),
     "email": ("PII", [r"e.?mail"]),
     "phone": ("PII", [r"phone", _w("mobile"), _w("telephone"), _w("cell_?number")]),
+    # ip_address must come before address: "ip_address" also matches the
+    # "address" token, and equal name scores go to the first category listed.
+    "ip_address": ("PII", [_w("ip_?address"), r"^ip$"]),
     "address": ("PII", [_w("address"), _w("street"), _w("zip_?code"), _w("postal_?code"),
                          _w("postcode")]),
     "national_id": ("PII", [_w("ssn"), r"social_?security", r"national_?id", _w("tax_?id"),
                              _w("nino"), r"passport", r"driver.?s?_?licen[sc]e"]),
     "date_of_birth": ("PII", [_w("dob"), r"date_?of_?birth", r"birth_?date"]),
-    "ip_address": ("PII", [_w("ip_?address"), r"^ip$"]),
     "username_login": ("PII", [r"user_?name", _w("login")]),
     "gender": ("PII", [_w("gender"), _w("sex")]),
     "medical_record": ("PHI", [r"medical_?record", _w("mrn"), r"patient_?id", _w("patient")]),
@@ -74,6 +86,17 @@ CONTENT_PATTERNS: Dict[str, Tuple[re.Pattern, str]] = {
     "ip_address": (re.compile(r"^(\d{1,3}\.){3}\d{1,3}$"), "PII"),
     "credit_card": (re.compile(r"^[\d\-\s]{13,23}$"), "PCI"),
     "bank_account": (re.compile(r"^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$"), "PCI"),
+}
+
+# Plain-language names used in the report, alerts and reasons.
+GROUP_LABELS: Dict[str, str] = {"PII": "Personal data", "PHI": "Health data", "PCI": "Payment data"}
+TYPE_LABELS: Dict[str, str] = {
+    "full_name": "person's name", "email": "email address", "phone": "phone number",
+    "address": "postal address", "national_id": "national ID number (e.g. SSN, passport)",
+    "date_of_birth": "date of birth", "ip_address": "IP address", "username_login": "username or login",
+    "gender": "gender information", "medical_record": "medical record or patient ID", "diagnosis": "diagnosis or condition",
+    "medication": "medication or prescription", "health_plan": "health insurance ID",
+    "credit_card": "credit card number", "bank_account": "bank account number",
 }
 
 CONTENT_MATCH_THRESHOLD = 0.6
@@ -114,7 +137,8 @@ def _match_name(col_name: str) -> List[Tuple[str, str]]:
     return matches
 
 
-def _match_content(series: pd.Series, sample_size: int, random_state: int) -> List[Tuple[str, str, float, bool]]:
+def _match_content(series: pd.Series, sample_size: int,
+                   random_state: int) -> List[Tuple[str, str, float, bool, int]]:
     non_null = series.dropna().astype(str).str.strip()
     non_null = non_null[non_null != ""]
     if non_null.empty:
@@ -134,7 +158,7 @@ def _match_content(series: pd.Series, sample_size: int, random_state: int) -> Li
             if luhn_rate < 0.5:
                 continue  # digit-shaped but fails checksum -> probably just another ID, not a card
             validated = True
-        results.append((category, group, round(rate, 3), validated))
+        results.append((category, group, round(rate, 3), validated, len(sample)))
     return results
 
 
@@ -147,7 +171,8 @@ def detect_sensitive_data(series: pd.Series, col_name: str, sample_size: int = 1
     content_matches = [] if skip_content else _match_content(series, sample_size, random_state)
 
     if not name_matches and not content_matches:
-        return {"is_sensitive": False, "category": None, "type": None, "confidence": 0.0, "detected_by": []}
+        return {"is_sensitive": False, "category": None, "type": None, "confidence": 0.0, "detected_by": [],
+                "category_label": None, "type_label": None, "reasons": []}
 
     scores: Dict[str, Dict[str, Any]] = {}
     for category, group in name_matches:
@@ -155,10 +180,12 @@ def detect_sensitive_data(series: pd.Series, col_name: str, sample_size: int = 1
         entry["score"] += NAME_WEIGHT
         entry["by"].add("column_name")
 
-    for category, group, rate, validated in content_matches:
+    content_detail: Dict[str, Tuple[float, bool, int]] = {}
+    for category, group, rate, validated, n_sampled in content_matches:
         entry = scores.setdefault(category, {"group": group, "score": 0.0, "by": set()})
         entry["score"] += CONTENT_WEIGHT * rate + (CHECKSUM_VALIDATED_BONUS if validated else 0.0)
         entry["by"].add("content_pattern")
+        content_detail[category] = (rate, validated, n_sampled)
 
     best_key = max(scores, key=lambda k: scores[k]["score"])
     best = scores[best_key]
@@ -170,7 +197,29 @@ def detect_sensitive_data(series: pd.Series, col_name: str, sample_size: int = 1
         "type": best_key,            # e.g. "email", "diagnosis", "credit_card"
         "confidence": confidence,
         "detected_by": sorted(best["by"]),
+        "category_label": GROUP_LABELS.get(best["group"], best["group"]),
+        "type_label": TYPE_LABELS.get(best_key, best_key.replace("_", " ")),
+        "reasons": _reasons(best_key, best["by"], content_detail.get(best_key)),
     }
+
+
+def _with_article(label: str) -> str:
+    if label.endswith("information"):
+        return label
+    return ("an " if label[0].lower() in "aeio" else "a ") + label
+
+
+def _reasons(category: str, by: Any, content: Any) -> List[str]:
+    """Why a column was flagged, in plain sentences (no values quoted)."""
+    label = _with_article(TYPE_LABELS.get(category, category.replace("_", " ")))
+    reasons = []
+    if "column_name" in by:
+        reasons.append(f"Its name suggests it holds {label}.")
+    if "content_pattern" in by and content:
+        rate, validated, n_sampled = content
+        reasons.append(f"{round(rate * 100)}% of {n_sampled:,} sampled values have the format of {label}"
+                       + (" and pass the card-number checksum." if validated else "."))
+    return reasons
 
 
 def mask_value(value: Any) -> str:

@@ -116,12 +116,13 @@ def pandas_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                  "distinct counts, top values, numeric/text/date stats, histograms, outliers.")]
 
     if ctx["max_non_null"] > s.sample_size_for_content_checks:
-        out.append(check("pii", "PII/PHI content checks", PARTIAL,
-                         f"Values sampled: {s.sample_size_for_content_checks:,} rows per column "
-                         f"(largest column has {ctx['max_non_null']:,}). Column names are always checked.",
+        out.append(check("pii", "Personal & sensitive data detection", PARTIAL,
+                         f"Column names checked; values checked on a sample of {s.sample_size_for_content_checks:,} "
+                         f"rows per column (largest column has {ctx['max_non_null']:,}).",
                          {"sample_size_for_content_checks": ctx["max_non_null"]}))
     else:
-        out.append(check("pii", "PII/PHI content checks", RAN, "Every value checked, plus column names."))
+        out.append(check("pii", "Personal & sensitive data detection", RAN,
+                         "Column names and every value checked."))
 
     out.append(check("duplicate_rows", "Duplicate rows", RAN, "Exact duplicates across all columns."))
     if ctx["n_cols"] > s.max_duplicate_column_check:
@@ -188,7 +189,7 @@ def bigquery_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                  + (f"; {ctx['n_skipped']} skipped (unsupported type)." if ctx["n_skipped"] else "."))]
     na = "Not available on the BigQuery engine"
     out += [
-        check("pii", "PII/PHI content checks", NOT_AVAILABLE,
+        check("pii", "Personal & sensitive data detection", NOT_AVAILABLE,
               "Column names only: checking values would mean pulling them out of the warehouse."),
         check("histograms", "Histograms and outliers", NOT_AVAILABLE, na + " yet (needs an extra pass)."),
         check("duplicate_rows", "Duplicate rows", NOT_AVAILABLE, na + " yet (needs an extra pass)."),
