@@ -137,10 +137,10 @@ def test_cli_run_prints_summary_and_reproducible_command(tmp_path, monkeypatch, 
     assert "ri_parent_min_unique_pct" in capsys.readouterr().err
 
 
-def test_readme_settings_table_is_current():
+def test_docs_settings_table_is_current():
     import pathlib
     from datascope.settings import settings_markdown
-    readme = (pathlib.Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
+    readme = (pathlib.Path(__file__).parent.parent / "docs" / "settings.md").read_text(encoding="utf-8")
     start = readme.index("<!-- settings-table:start")
     body = readme[readme.index("-->", start) + 3: readme.index("<!-- settings-table:end -->")].strip()
-    assert body == settings_markdown(), "README settings table is stale: regenerate it with settings_markdown()"
+    assert body == settings_markdown(), "docs/settings.md settings table is stale: regenerate it with settings_markdown()"

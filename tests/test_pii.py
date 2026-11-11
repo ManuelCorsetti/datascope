@@ -184,3 +184,16 @@ def test_every_flagged_column_alerts_by_default_and_the_bar_is_a_setting():
     assert alerted() == ["c1", "full_name"]
     assert alerted(sensitive_alert_min_confidence=0.5) == ["full_name"]
     assert alerted(sensitive_min_match_pct=10) == ["full_name"]
+
+
+def test_dependency_exceptions_are_masked_for_personal_data_columns():
+    from datascope import DataProfiler
+    n = 200
+    full_name = [f"Leader Number{i % 5}" for i in range(n)]
+    team = [f"team_{i % 5}" for i in range(n)]
+    team[7] = "team_4"  # one exception to full_name -> team (row 7 is Leader Number2)
+    deps = DataProfiler().profile(pd.DataFrame({"full_name": full_name, "team": team}))["column_dependencies"]
+    dep = next(d for d in deps if (d["determinant"], d["dependent"]) == ("full_name", "team"))
+    [example] = dep["violation_examples"]
+    assert example["determinant_value"] != "Leader Number2" and example["determinant_value"].startswith("L")
+    assert example["dependent_value"] == "team_4"  # not a personal-data column: shown as is
