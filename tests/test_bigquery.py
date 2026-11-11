@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from datascope import BigQueryProfiler, DataProfiler, estimate_bigquery_cost, profile_bigquery
-from datascope.bigquery import UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql, format_bytes, quote_identifier
+from datascope.bigquery import (UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql,
+                                correlation_expressions, format_bytes, quote_identifier)
 from datascope.cli import main
 from datascope.html_report import _sanitize
 from datascope.semantic import infer_semantic_type_from_summary
@@ -51,6 +52,15 @@ class TestSqlGeneration:
         assert "COUNT(DISTINCT TO_JSON_STRING(`tags`))" in sql
         assert "COUNT(DISTINCT TO_JSON_STRING(`payload`))" in sql
         assert "APPROX_TOP_COUNT" not in sql
+
+    def test_correlation_expressions_cover_each_pair_once(self):
+        exprs = correlation_expressions([(0, "a", "INT64"), (2, "b", "FLOAT64"), (5, "c", "NUMERIC")])
+        assert [alias for alias, _ in exprs] == ["corr__0__2", "corr__0__5", "corr__2__5"]
+        # same NaN/inf guard as the per-column stats
+        assert exprs[0][1] == "CORR(CAST(`a` AS FLOAT64), IF(IS_NAN(`b`) OR IS_INF(`b`), NULL, `b`))"
+        sql = build_profile_sql("`p.d.t`", [("a", "INT64", "NULLABLE")], extra=exprs)
+        assert sql.count("FROM ") == 1 and ",\nFROM" not in sql
+        assert sql.rstrip().split("\n")[-2].endswith("AS corr__2__5")
 
     def test_unknown_type_raises_instead_of_guessing(self):
         with pytest.raises(ValueError, match=r"'VECTOR'.*'emb'"):
@@ -190,6 +200,24 @@ class TestProfileShape:
         assert "order_id" not in canned.queries[-1]
         with pytest.raises(ValueError, match="nope"):
             profiler.profile(table="proj.sales.orders", columns=["nope"])
+
+    def test_correlations_ride_in_the_first_query_only(self, canned):
+        canned.row["corr__0__2"] = 0.912345
+        result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
+        first, second = result["meta"]["sql"]
+        assert "CORR(CAST(`order_id` AS FLOAT64), CAST(`amount` AS FLOAT64)) AS corr__0__2" in first
+        assert "CORR(" not in second
+        assert result["correlations"] == {"columns": ["order_id", "amount"],
+                                          "matrix": [[1.0, 0.912], [0.912, 1.0]], "truncated": False}
+        assert result["high_correlation_pairs"] == [{"col1": "order_id", "col2": "amount", "correlation": 0.912}]
+        assert any("highly correlated" in a["message"] for a in result["overview"]["alerts"])
+
+    def test_correlations_can_be_turned_off_or_capped(self, canned):
+        assert "CORR(" not in BigQueryProfiler(client=canned, max_correlation_cols=0).build_sql("proj.sales.orders")[0]
+        # one numeric column left -> nothing to pair it with
+        assert "CORR(" not in BigQueryProfiler(client=canned, max_correlation_cols=1).build_sql("proj.sales.orders")[0]
+        result = BigQueryProfiler(client=canned, max_correlation_cols=0).profile(table="proj.sales.orders")
+        assert result["correlations"] is None and result["high_correlation_pairs"] == []
 
     def test_wide_tables_are_split_into_batches(self, canned):
         result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
@@ -395,6 +423,28 @@ class TestExecutedAgainstRealData:
         assert {"columns": ["customer_id"], "type": "single"} in result["pk_candidates"]
         assert by_name["email"]["sensitive"]["is_sensitive"]
         assert by_name["email"]["top_values"] == []
+
+    def test_correlations_agree_with_pandas_engine(self, warehouse):
+        client, _ = warehouse
+        rng = np.random.default_rng(3)
+        x = rng.normal(0, 1, 300)
+        df = pd.DataFrame({
+            "x": x,
+            "y": 2 * x + rng.normal(0, 0.3, 300),   # strong positive
+            "neg": (-x * 10).round().astype("int64"),  # strong negative, integer column
+            "noise": rng.normal(0, 1, 300),
+            "flat": np.full(300, 4.0),              # no variance -> 0, like pandas
+            "label": rng.choice(["a", "b"], 300),    # not numeric: left out
+        })
+        df.loc[rng.choice(300, 30, replace=False), "y"] = np.nan  # pairwise-complete handling
+        client.load("corr_demo", df)
+
+        got = profile_bigquery("demo.shop.corr_demo", client=client, output_html=None)
+        want = DataProfiler().profile(df)
+        assert got["correlations"]["columns"] == want["correlations"]["columns"] == ["x", "y", "neg", "noise", "flat"]
+        np.testing.assert_allclose(got["correlations"]["matrix"], want["correlations"]["matrix"], atol=0.002)
+        assert {(p["col1"], p["col2"]) for p in got["high_correlation_pairs"]} == \
+               {(p["col1"], p["col2"]) for p in want["high_correlation_pairs"]}
 
     def test_query_profile_covers_every_result_column(self, warehouse):
         client, df = warehouse

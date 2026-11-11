@@ -118,7 +118,8 @@ min / max / mean / std / sum / quartiles (median), zeros, negatives;
 string length stats and blank count; date range, future-dated values and
 weekday split; boolean true/false split. Semantic types, quality rules,
 dbt snippets, single-column primary-key candidates and alerts are
-derived from those, as usual.
+derived from those, as usual. Pearson correlations between numeric
+columns come from `CORR()` in the same scan.
 
 **Things to know**
 
@@ -127,8 +128,12 @@ derived from those, as usual.
   counts are exact by default; pass `exact_distinct=False`
   (`--approx-distinct`) to switch to `APPROX_COUNT_DISTINCT` on very
   large tables.
+- Pearson correlations between numeric columns are computed with `CORR()`
+  in the first profiling query (first `max_correlation_cols=30` numeric
+  columns; `0` turns them off). They agree with the pandas engine; the
+  missing-value correlation matrix is not computed.
 - Not computed yet (each needs extra passes over the data): histograms,
-  outlier counts, skew/kurtosis, correlations, duplicate rows, composite
+  outlier counts, skew/kurtosis, duplicate rows, composite
   keys, functional dependencies, and detecting dates stored as text.
 - PII/PHI detection is by **column name only** — content checks would
   mean pulling values out of the warehouse.

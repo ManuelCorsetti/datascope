@@ -22,8 +22,9 @@ Just want the SQL, to read it or run it yourself?
 What this basic engine covers: row count, nulls, distinct counts, top
 values, min / max / mean / std / sum / quartiles (median) for numbers,
 length stats for strings, range + weekday split for dates, true/false
-split for booleans. What it deliberately does not (each would need
-extra passes over the data): histograms, outlier counts, correlations,
+split for booleans, and Pearson correlations between numeric columns
+(CORR() in the same scan). What it deliberately does not (each would need
+extra passes over the data): histograms, outlier counts,
 duplicate-row detection, composite keys, functional dependencies, and
 content-based PII detection (PII is flagged from column names only).
 """
@@ -33,6 +34,7 @@ import os
 import re
 import warnings
 from datetime import date, datetime, timezone
+from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
@@ -113,6 +115,26 @@ def _query_from_clause(query: str) -> str:
     return "(\n" + q + "\n)"
 
 
+def _numeric_value(name: str, field_type: str) -> str:
+    """A numeric column as FLOAT64 with NaN / +-inf turned into NULL, so
+    they can't poison an aggregate. FLOAT64 also keeps SUM from
+    overflowing INT64 and keeps NUMERIC results out of Decimal."""
+    c = quote_identifier(name)
+    if field_type.upper() in _FLOAT_TYPES:
+        return f"IF(IS_NAN({c}) OR IS_INF({c}), NULL, {c})"
+    return f"CAST({c} AS FLOAT64)"
+
+
+def correlation_expressions(numeric: Sequence[Tuple[int, str, str]]) -> List[Tuple[str, str]]:
+    """(result_alias, CORR expression) for every pair of `numeric`
+    columns, given as (field index, name, bigquery_type). CORR skips rows
+    where either side is NULL — pairwise-complete, like pandas."""
+    return [
+        (f"corr__{i}__{j}", f"CORR({_numeric_value(a, ta)}, {_numeric_value(b, tb)})")
+        for (i, a, ta), (j, b, tb) in combinations(numeric, 2)
+    ]
+
+
 def _column_expressions(alias: str, name: str, field_type: str, mode: str,
                         top_n: int, exact_distinct: bool) -> List[Tuple[str, str]]:
     """(result_column_alias, sql_expression) pairs for one column."""
@@ -139,15 +161,10 @@ def _column_expressions(alias: str, name: str, field_type: str, mode: str,
         add("distinct", f"APPROX_COUNT_DISTINCT({distinct_arg})")
 
     if kind == "numeric":
+        x = _numeric_value(name, field_type)
         if t in _FLOAT_TYPES:
-            # NaN / +-inf would poison every aggregate below.
-            x = f"IF(IS_NAN({c}) OR IS_INF({c}), NULL, {c})"
             add("infinite", f"COUNTIF(IS_INF({c}))")
             add("nan", f"COUNTIF(IS_NAN({c}))")
-        else:
-            # FLOAT64 keeps SUM from overflowing INT64 and keeps
-            # NUMERIC results out of Decimal.
-            x = f"CAST({c} AS FLOAT64)"
         add("min", f"MIN({x})")
         add("max", f"MAX({x})")
         add("mean", f"AVG({x})")
@@ -190,13 +207,15 @@ def build_profile_sql(
     top_n_values: int = 10,
     exact_distinct: bool = True,
     alias_offset: int = 0,
+    extra: Sequence[Tuple[str, str]] = (),
 ) -> str:
     """The profiling query: one scan, one result row.
 
     `from_clause` is a quoted table or a parenthesised subquery; `fields`
     is (name, bigquery_type, mode) per column. Result columns are named
     `c<i>__<metric>` (plus `n_rows`), where i is the column's position
-    in `fields` offset by `alias_offset`.
+    in `fields` offset by `alias_offset`. `extra` is further
+    (result_alias, expression) pairs, e.g. `correlation_expressions`.
     """
     lines = ["  COUNT(*) AS n_rows"]
     for i, (name, field_type, mode) in enumerate(fields):
@@ -204,6 +223,9 @@ def build_profile_sql(
         lines.append(f"  -- {name.replace(chr(10), ' ')} ({field_type}{' ' + mode if (mode or '').upper() == 'REPEATED' else ''})")
         for result_alias, expr in _column_expressions(alias, name, field_type, mode, top_n_values, exact_distinct):
             lines.append(f"  {expr} AS {result_alias}")
+    if extra:
+        lines.append("  -- correlations between numeric columns")
+        lines.extend(f"  {expr} AS {result_alias}" for result_alias, expr in extra)
     body = []
     for i, line in enumerate(lines):
         is_comment = line.lstrip().startswith("--")
@@ -247,6 +269,9 @@ class BigQueryProfiler:
         large tables); APPROX_COUNT_DISTINCT (HyperLogLog++) when False.
     max_columns_per_query : wide tables are split into several queries
         of at most this many columns each.
+    max_correlation_cols : Pearson correlations are computed between the
+        first this-many numeric columns (n*(n-1)/2 CORR() aggregates in
+        the first query); 0 turns them off.
     maximum_bytes_billed : safety cap passed to every query job.
     """
 
@@ -259,6 +284,7 @@ class BigQueryProfiler:
         exact_distinct: bool = True,
         max_columns_per_query: int = 100,
         maximum_bytes_billed: Optional[int] = None,
+        max_correlation_cols: int = 30,
     ):
         if max_columns_per_query < 1:
             raise ValueError("max_columns_per_query must be >= 1")
@@ -269,6 +295,7 @@ class BigQueryProfiler:
         self.exact_distinct = exact_distinct
         self.max_columns_per_query = max_columns_per_query
         self.maximum_bytes_billed = maximum_bytes_billed
+        self.max_correlation_cols = max_correlation_cols
 
     # ------------------------------------------------------------ client
     @property
@@ -356,13 +383,47 @@ class BigQueryProfiler:
                 warnings.warn(_skip_message(name, field_type), UnsupportedColumnWarning, stacklevel=4)
             else:
                 fields.append((name, field_type, mode))
+        # Correlations ride along in the first query rather than a query
+        # of their own: for a table under max_columns_per_query columns
+        # that query already reads every numeric column, so they cost
+        # no extra bytes.
+        corr = correlation_expressions(self._correlation_fields(fields))
         sqls = [
             build_profile_sql(from_clause, fields[start:start + self.max_columns_per_query],
                               top_n_values=self.top_n_values, exact_distinct=self.exact_distinct,
-                              alias_offset=start)
+                              alias_offset=start, extra=corr if start == 0 else ())
             for start in range(0, len(fields), self.max_columns_per_query)
         ] or [build_profile_sql(from_clause, [])]
         return fields, sqls, num_bytes, default_name, skipped
+
+    def _numeric_fields(self, fields: Sequence[Tuple[str, str, str]]) -> List[Tuple[int, str, str]]:
+        return [(i, name, t) for i, (name, t, mode) in enumerate(fields)
+                if _column_kind(t, mode, name) == "numeric"]
+
+    def _correlation_fields(self, fields: Sequence[Tuple[str, str, str]]) -> List[Tuple[int, str, str]]:
+        numeric = self._numeric_fields(fields)[: max(self.max_correlation_cols, 0)]
+        return numeric if len(numeric) >= 2 else []
+
+    def _correlations(self, fields, row: Dict[str, Any], column_profiles) -> Optional[Dict[str, Any]]:
+        """Shape the CORR() results like the pandas engine's matrix: NaN
+        (constant or too few rows) becomes 0, the diagonal is 1 unless the
+        column has no variance, values rounded to 3 places."""
+        numeric = self._correlation_fields(fields)
+        if not numeric:
+            return None
+        n = len(numeric)
+        matrix = [[0.0] * n for _ in range(n)]
+        for a in range(n):
+            std = (column_profiles[numeric[a][0]].get("numeric_stats") or {}).get("std")
+            matrix[a][a] = 1.0 if std else 0.0
+            for b in range(a + 1, n):
+                v = _safe_float(row.get(f"corr__{numeric[a][0]}__{numeric[b][0]}"))
+                matrix[a][b] = matrix[b][a] = round(max(-1.0, min(1.0, v)), 3) if v is not None else 0.0
+        return {
+            "columns": [name for _, name, _ in numeric],
+            "matrix": matrix,
+            "truncated": len(self._numeric_fields(fields)) > n,
+        }
 
     # ------------------------------------------------------------ public
     def build_sql(self, table: Optional[str] = None, query: Optional[str] = None,
@@ -428,6 +489,9 @@ class BigQueryProfiler:
         for c in column_profiles:
             type_distribution[c["semantic_type"]] = type_distribution.get(c["semantic_type"], 0) + 1
 
+        correlations = self._correlations(fields, row, column_profiles)
+        high_correlation_pairs = DataProfiler()._high_correlation_pairs(correlations)
+
         pk_candidates = []
         if n_rows and self.exact_distinct:
             pk_candidates = [{"columns": [c["name"]], "type": "single"}
@@ -457,16 +521,17 @@ class BigQueryProfiler:
                 "sensitive_columns_count": sum(1 for c in column_profiles if c["sensitive"]["is_sensitive"]),
             },
             "columns": column_profiles,
-            "correlations": None,
+            "correlations": correlations,
             "missing_correlation": None,
             "pk_candidates": pk_candidates,
-            "high_correlation_pairs": [],
+            "high_correlation_pairs": high_correlation_pairs,
             "duplicate_columns": [],
             "functional_dependencies": [],
         }
         alerts = [{"severity": "warning", "column": None, "message": _skip_message(sk["name"], sk["dtype"])}
                   for sk in skipped]
-        result["overview"]["alerts"] = alerts + DataProfiler()._build_alerts(column_profiles, 0, n_rows)
+        result["overview"]["alerts"] = alerts + DataProfiler()._build_alerts(column_profiles, 0, n_rows,
+                                                                            high_correlation_pairs)
         return result
 
     def to_html(self, profile_dict: Dict[str, Any], output_path: str) -> str:

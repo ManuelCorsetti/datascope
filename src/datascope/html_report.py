@@ -686,7 +686,7 @@ function renderHeatmap(containerId, data, emptyMsg) {
   container.innerHTML = html;
   wireTooltips(container);
 }
-function renderCorrelation() { renderHeatmap('corr-heatmap', PROFILE.correlations, PROFILE.meta.engine === 'bigquery' ? 'Not computed by the BigQuery engine.' : 'Fewer than two numeric columns \u2014 nothing to correlate.'); }
+function renderCorrelation() { renderHeatmap('corr-heatmap', PROFILE.correlations, 'Fewer than two numeric columns \u2014 nothing to correlate.'); }
 function renderMissingCorr() {
   const section = document.getElementById('missing-corr-section');
   if (!PROFILE.missing_correlation) { section.style.display = 'none'; return; }
