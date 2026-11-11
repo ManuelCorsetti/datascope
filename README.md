@@ -1,509 +1,292 @@
-# datascope
+<div align="center">
 
-Extensive Python data profiling &rarr; one self-contained interactive HTML
-dashboard. No server, no JS framework, no build step — the report is a
-single `.html` file you can email, host, or open locally forever. The
-only external resource is a Google Fonts CSS link (progressive
-enhancement — falls back to system fonts if it can't load).
+# 🔭 datascope
 
-## Install
+### Profile any dataset into one beautiful, self-contained HTML report
 
+**A pandas DataFrame, a file, or a BigQuery table in → an interactive data-quality dashboard out.**
+<br>No server, no JavaScript framework, no build step: just one `.html` file you can open, email or host.
+
+[![CI](https://github.com/ManuelCorsetti/datascope/actions/workflows/ci.yml/badge.svg)](https://github.com/ManuelCorsetti/datascope/actions/workflows/ci.yml)
+![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
+![Output: one HTML file](https://img.shields.io/badge/output-one%20HTML%20file-1a73e8)
+![BigQuery: runs in the warehouse](https://img.shields.io/badge/BigQuery-runs%20in%20the%20warehouse-669DF6?logo=googlecloud&logoColor=white)
+
+[🚀 Quick start](#-quick-start) •
+[🖼️ The report](docs/report-tour.md) •
+[🔎 Checks](docs/checks.md) •
+[☁️ BigQuery](docs/bigquery.md) •
+[⚙️ Settings](docs/settings.md) •
+[📚 All docs](docs/README.md)
+
+<br>
+
+<img src="docs/images/report-overview.png" alt="The top of a datascope report: rows, columns, personal-data and memory tiles, a run-summary strip, and the data-quality section split into table-level and column-level checks" width="920">
+
+</div>
+
+---
+
+## ✨ Why datascope
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 📄 One file, zero setup
+The report is a single, self-contained `.html` file. Open it in any browser, attach it to an email, drop it on a wiki. Nothing to install for the people reading it.
+
+</td>
+<td width="33%" valign="top">
+
+### 🩺 Data quality, kept honest
+Completeness, duplicates, constant columns and alerts, split into **table-level** and **column-level** checks, never blended into one opaque score.
+
+</td>
+<td width="33%" valign="top">
+
+### 🔐 Personal data, flagged and masked
+Finds columns that hold **PII**, health or payment data from names *and* values, explains why, and masks the values the report lists.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🔗 Relationships between columns
+**Referential integrity** (do the IDs exist?), **column relationship dependencies** (`zip → state`), correlations and primary-key candidates.
+
+</td>
+<td valign="top">
+
+### ☁️ BigQuery, in the warehouse
+Profile a table or query **inside BigQuery**: only aggregates come back. Estimate the cost first, or profile a 1% sample and project the full run.
+
+</td>
+<td valign="top">
+
+### 🔁 Repeatable by design
+Every threshold is a documented setting. Every run tells you what it checked, what it **didn't**, and prints the command to reproduce or extend it.
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 Quick start
+
+**1. Install**
+
+```bash
+pip install -e .                 # core: pandas + numpy
+pip install -e ".[bigquery]"     # + profile BigQuery tables
 ```
-pip install -e .
-```
 
-`.xlsx`/`.xls` input requires the optional `excel` extra:
+**2. Profile something.** Pick whichever fits:
 
+```bash
+# 💻 From the command line
+datascope sales.csv -o sales.html --open
 ```
-pip install -e ".[excel]"
-```
-
-## Usage
 
 ```python
-import pandas as pd
+# 🐍 From Python: a file or a DataFrame
 from datascope import profile
 
-df = pd.read_csv("your_data.csv")
-profile(df, output_html="report.html", source_name="your_data")
+profile("sales.csv", output_html="sales.html")
+profile(df, output_html="sales.html", source_name="sales")
 ```
 
-Straight from a file, no DataFrame needed:
-
-```python
-from datascope import profile
-profile("your_data.csv", output_html="report.html")
-```
-
-Or from the command line:
-
-```
-python -m datascope your_data.csv -o report.html --open
-```
-
-### Referential integrity
-
-Check that every value in a column exists in a key column — in the same
-table, or in another one. NULLs are not counted as orphans, as with a
-SQL foreign key:
-
-```python
-customers = pd.read_csv("customers.csv")
-profile(orders, references={
-    "customer_id": ("customers.id", customers["id"]),  # another table: (label, key column)
-    "parent_order_id": "order_id",                     # same table: a column name
-})
-```
-
-```
-python -m datascope orders.csv --reference customer_id=customers.csv:id --reference parent_order_id=order_id
-```
-
-The report gets a Referential integrity panel (orphan row count and
-percentage, distinct missing values, the most common examples), and any
-orphans raise a column-level alert. datascope also **suggests**
-same-table references on its own when a column's name points at an
-identifier column (`referred_by_customer_id` -> `customer_id`, or any
-`*_id` -> a column called `id`) and at least 90% of its values match.
-Value overlap alone isn't enough, because surrogate keys 1..N overlap by
-chance.
-
-When suggestions are made: after the column statistics are computed,
-because that is when datascope knows which columns really look like keys
-(identifier, no NULLs, at least 99% unique). With pandas the suggested
-checks then run in memory. On BigQuery each one would be an extra query,
-so by default they are only **listed**, with the cost of checking each
-(from a free dry run), and the run summary gives the flag that checks
-them. `--suggested-references check|list|off` overrides either default,
-and every threshold above is a setting (see below).
-
-Try it first on synthetic data (customers table with realistic messiness
-baked in — PII, a couple of quality bugs, correlated missingness,
-duplicate rows, dangling references):
-
-```
-python example.py
-```
-
-## BigQuery
-
-Profile a table or a query *inside* BigQuery: datascope writes the SQL,
-BigQuery runs it, and only the aggregated results come back — no rows
-are downloaded. The result is the same profile dict and HTML report as
-the local engine.
-
-```
-pip install -e ".[bigquery]"
-```
-
-```python
-from datascope import profile_bigquery
-
-# a whole table
-profile_bigquery("my-project.sales.orders", output_html="orders.html")
-
-# a sub-selection of columns
-profile_bigquery("my-project.sales.orders", columns=["order_id", "amount", "status"])
-
-# a SQL query — every column the query returns is profiled
-profile_bigquery(query="""
-    SELECT o.*, c.country
-    FROM `my-project.sales.orders` o JOIN `my-project.sales.customers` c USING (customer_id)
-    WHERE o.created_at >= '2026-01-01'
-""", output_html="recent_orders.html")
-```
-
-It returns the profile dict (`output_html=None` skips the report), and
-the SQL that ran is in `result["meta"]["sql"]`. Authentication uses your
-default Google credentials (`gcloud auth application-default login`);
-pass `project=` / `location=`, or your own `client=`, to override.
-
-From the command line:
-
-```
+```bash
+# ☁️ Inside BigQuery: only aggregates leave the warehouse
 datascope --bq-table my-project.sales.orders -o orders.html
-datascope --bq-table my-project.sales.orders --columns order_id,amount -o orders.html
-datascope --bq-query-file recent_orders.sql -o recent_orders.html
-datascope --bq-table my-project.sales.orders --print-sql     # just show the SQL, run nothing
-datascope --bq-table my-project.sales.orders --reference customer_id=my-project.sales.customers.id
 ```
 
-Referential-integrity checks take a same-table column name or a
-`project.dataset.table.column` reference:
-`profile_bigquery("my-project.sales.orders", references={"customer_id": "my-project.sales.customers.id"})`.
+**3. Or try it on built-in demo data** (a messy customer table with personal data, duplicates, dangling IDs and a few planted bugs):
 
-**Check the cost first.** A dry run tells you how much data the profile
-will scan — the same figure the BigQuery console shows before you press
-Run — without running or billing anything:
-
-```python
-from datascope import estimate_bigquery_cost
-
-est = estimate_bigquery_cost("my-project.sales.orders")
-est["bytes_processed_human"]   # e.g. '12.40 GB'
-est["estimated_cost_usd"]      # bytes x on-demand price (default $6.25/TiB)
+```bash
+python example.py        # writes example_report.html
 ```
 
-```
-datascope --bq-table my-project.sales.orders --estimate
-```
+> [!TIP]
+> New here? The **[Getting started guide](docs/getting-started.md)** walks through installing, your first report and what to look at first, in about five minutes.
 
-**Try it on a sample first.** `--sample` profiles a random 1% of the
-table, capped at 1,000,000 rows, instead of all of it:
+---
 
-```
-datascope --bq-table my-project.sales.orders --sample
-datascope --bq-table my-project.sales.orders --sample --sample-percent 5 --sample-max-rows 200000
-```
+## 🖼️ What you get
 
-That runs `SELECT * FROM <table> TABLESAMPLE SYSTEM (1 PERCENT) LIMIT
-1000000`, which reads, and bills, only the sampled storage blocks. After
-the run it projects what profiling the whole table with the same settings
-would use:
+<table>
+<tr>
+<td width="55%"><a href="docs/report-tour.md#-data-quality"><img src="docs/images/showcase-data-quality.png" alt="The data-quality section of a report"></a></td>
+<td valign="top">
 
-```
-Sample: 8,412 rows (1% of my-project.sales.orders, which has 841,003 rows).
-Profiling the whole table with the same settings would process about 1.21 GB (free dry run; what
-on-demand pricing bills) and use roughly 420 slot-seconds (this run's slot time x 100.0, ...).
-```
+### 🩺 Data quality, at two levels
+**Table level:** completeness and duplicate rows.<br>
+**Column level:** missing values, constant columns.<br>
+Each side has its own alerts, most severe first. Click a column name to jump to it.
 
-The slot-time figure is the sample's slot time scaled up by rows: a rough
-guide, since large queries don't scale exactly. Things to know: every
-figure in the report describes the sample, and keys or references found
-in a sample may not hold for the whole table. Each query re-samples, so
-the profiling, key and reference steps can see slightly different rows.
-`TABLESAMPLE` picks whole storage blocks, so a small table may come back
-whole or empty; the output says so when that happens. `--sample` also
-works with `--estimate` and `--print-sql`, which then describe the sample
-query. In Python: `profile_bigquery(table, sample_percent=1,
-sample_max_rows=1_000_000)`.
+<sub>[Read more →](docs/report-tour.md#-data-quality)</sub>
 
-The byte count is an upper bound (clustered tables can scan less). The
-dollar figure is only bytes x `price_per_tib_usd`: it ignores the
-monthly free tier, regional price differences, and doesn't apply if you
-pay for capacity (slots) rather than on-demand.
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-**What the BigQuery engine computes**, in one scan of the source:
-total rows; per column nulls, distinct count and top values; numeric
-min / max / mean / std / sum / quartiles (median), zeros, negatives;
-string length stats and blank count; date range, future-dated values and
-weekday split; boolean true/false split. Semantic types, quality rules,
-dbt snippets, single-column primary-key candidates and alerts are
-derived from those, as usual. Pearson correlations between numeric
-columns come from `CORR()` in the same scan. A second, small query then
-counts distinct values exactly for the few columns that could be keys
-(see distinct counts below).
+### 🔐 Personal & sensitive data
+Which columns look like they hold **PII**, health or payment data, *why* (in plain words), and how confident datascope is. Listed values are masked: `j***@***.com`.
 
-**Things to know**
+<sub>[Read more →](docs/report-tour.md#-personal--sensitive-data)</sub>
 
-- Quartiles/median use `APPROX_QUANTILES` and top values use
-  `APPROX_TOP_COUNT`, so they are approximate on large tables.
-- **Distinct counts** (`--distinct-counts`): by default (`keys`) the
-  profiling query uses `APPROX_COUNT_DISTINCT` for every column, then a
-  second query counts exactly only the columns that could be keys: no
-  NULLs and nearly all values unique. An exact `COUNT(DISTINCT)` on every
-  column makes BigQuery move (shuffle) each column's values between stages
-  once per column, which on a ~150 MB table showed up as 5+ GB shuffled.
-  That costs nothing extra on on-demand pricing, but it is slot time on
-  capacity pricing. `exact` restores exact counts everywhere; `approx`
-  skips the second query and turns primary-key detection off.
-- Pearson correlations between numeric columns are computed with `CORR()`
-  in the first profiling query (first `max_correlation_cols=30` numeric
-  columns). That query already reads every numeric column of a table of
-  up to `max_columns_per_query` columns, so they usually cost nothing;
-  on wider tables it also reads the numeric columns of later batches.
-  `--estimate` shows the exact extra bytes, and `--no-correlations`
-  (`correlations=False`) turns them off. They agree with the pandas
-  engine; the missing-value correlation matrix is not computed.
-- Each referential-integrity check is one extra query: an anti-join that
-  reads only the two key columns and returns at most `ri_sample_orphans`
-  rows. Nothing is joined beyond that pair. Declared checks always run.
-  Suggested ones are listed with their cost by default (see Referential
-  integrity above); with `--suggested-references check` they run after
-  profiling, but only where the profile shows the parent column is a key.
-  `--estimate` then counts every name-matched pair, as an upper bound.
-- `--estimate` (`estimate_bigquery_cost`) breaks the cost down by section:
-  profiling, correlations, and each reference check:
+</td>
+<td width="55%"><a href="docs/report-tour.md#-personal--sensitive-data"><img src="docs/images/showcase-personal-data.png" alt="The personal and sensitive data panel"></a></td>
+</tr>
+<tr>
+<td width="55%"><a href="docs/report-tour.md#-referential-integrity"><img src="docs/images/showcase-referential-integrity.png" alt="The referential integrity panel"></a></td>
+<td valign="top">
 
-  ```
-  This profile will process 1.21 GB when run (about $0.0074 at $6.25/TiB on-demand). Nothing was run.
+### 🔗 Referential integrity
+Do the IDs exist? Declare checks with `--reference`, or let datascope spot them from column names. You get orphan rows, the missing values and examples.
 
-    profiling                                               1.16 GB  $0.0071
-    correlations                                               0 B   $0.0000  Extra columns the first profiling query reads ...
-    reference customer_id -> my-project.sales.customers.id  48.2 MB  $0.0003
-    suggested references                                       0 B   $0.0000  Listed after profiling with their cost, not run ...
-  ```
-- Not computed yet (each needs extra passes over the data): histograms,
-  outlier counts, skew/kurtosis, duplicate rows, composite
-  keys, column relationship dependencies, and detecting dates stored as
-  text.
-- Personal & sensitive data is detected by **column name only**: checking
-  values would mean pulling them out of the warehouse.
-- Cost: a table is scanned once (wide tables are split into queries of
-  `max_columns_per_query=100` columns; each column is still read once),
-  plus the small exact-count and reference queries. A SQL query source is
-  re-run for each query. Use `maximum_bytes_billed=` (`--max-bytes-billed`)
-  as a safety cap.
-- **On-demand vs slot pricing.** `--estimate` prices bytes processed, which
-  is what on-demand pricing bills. If your organisation pays for slots
-  (capacity pricing), you are billed for slot time instead, which a dry run
-  can't predict. Every run reports, per query and in total, the bytes
-  processed, the slot time and the bytes shuffled (as the console's job
-  details show them), so you can compare settings with real numbers.
-- A column whose type datascope doesn't recognise is **skipped, not
-  guessed at**: the rest of the table is still profiled, and the skip is
-  reported as a warning in the report's Alerts panel, on stderr from the
-  command line, as a Python `UnsupportedColumnWarning`, and in
-  `result["meta"]["skipped_columns"]`.
-- `ARRAY` columns count empty arrays as missing; `ARRAY`/`STRUCT`/`JSON`/
-  `GEOGRAPHY` columns only get null and distinct counts.
+<sub>[Read more →](docs/report-tour.md#-referential-integrity)</sub>
 
-## Settings and repeatable runs
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-Every threshold and limit that decides which checks run, or what gets
-flagged, is a setting with a default. From the command line each one is
-a flag (`datascope --help` lists them all, grouped by check). From
-Python, pass a `Settings` object or the same names as keywords:
+### 🔬 Every column, in detail
+Statistics, a quantile ruler, the distribution, top values, suggested **quality rules**, and a ready-to-paste **dbt** test block.
 
-```python
-from datascope import DataProfiler, Settings, profile
+<sub>[Read more →](docs/report-tour.md#-column-detail)</sub>
 
-profile(df, ri_parent_min_unique_pct=90, max_correlation_cols=60)
-DataProfiler(settings=Settings(correlations=False, suggested_references="list"))
+</td>
+<td width="55%"><a href="docs/report-tour.md#-column-detail"><img src="docs/images/showcase-column-detail.png" alt="The detail view of one column"></a></td>
+</tr>
+</table>
+
+<p align="center">👉 <b><a href="docs/report-tour.md">Take the full tour of the report</a></b></p>
+
+---
+
+## 🧭 How it works
+
+```mermaid
+flowchart LR
+    A["📄 File<br/>csv · tsv · parquet · xlsx · json"] --> P
+    B["🐼 pandas DataFrame"] --> P
+    C["☁️ BigQuery table or query"] --> Q
+    P["🐼 pandas engine<br/>profiles in memory"] --> D
+    Q["☁️ BigQuery engine<br/>writes SQL, BigQuery runs it"] --> D
+    D[("🧾 profile dict<br/>stats · checks · alerts · settings")] --> R["🖼️ HTML report"]
+    D --> S["🖥️ Run summary<br/>what ran · what didn't · rerun command"]
 ```
 
+Both engines produce the **same profile dict**, so the report, the alerts and the run summary work identically. The BigQuery engine does less (no histograms or duplicate-row counts, for example) because each extra check would mean another pass over your warehouse. The **[checks guide](docs/checks.md#-what-each-engine-supports)** has the full comparison.
+
+---
+
+## 📚 Documentation
+
+| | Guide | What's inside |
+|---|---|---|
+| 🚀 | **[Getting started](docs/getting-started.md)** | Install, your first report, the demo dataset, what to look at first |
+| 🖼️ | **[A tour of the report](docs/report-tour.md)** | Every panel, with screenshots, and how to read it |
+| 🔎 | **[The checks](docs/checks.md)** | What each check does, how it decides, which engine supports what |
+| ☁️ | **[BigQuery](docs/bigquery.md)** | Setup, cost estimates, sampling, slot usage, things to know |
+| ⚙️ | **[Settings & repeatable runs](docs/settings.md)** | Every setting with its default, the run summary, fixed heuristics |
+| 💻 | **[Command line reference](docs/cli.md)** | Every flag, grouped, plus a cookbook of common runs |
+| 🐍 | **[Python API](docs/python-api.md)** | Functions, classes, and the structure of the profile dict |
+
+---
+
+## ❓ FAQ
+
+<details>
+<summary><b>Does my data leave my machine?</b></summary>
+<br>
+
+No. The pandas engine works entirely in memory on your machine. The BigQuery engine runs SQL **inside BigQuery** and only brings back aggregates, never rows. The report file contains statistics plus a handful of example values (top values, examples of broken references). Values from columns flagged as personal data are masked wherever the report lists them. The report loads Google Fonts for its typefaces and icons; nothing about your data is sent.
+
+</details>
+
+<details>
+<summary><b>Is the report safe to share?</b></summary>
+<br>
+
+It's designed to be: no raw rows, and listed values from personal-data columns are masked (e.g. `j***@***.com`). Two caveats. Detection is pattern matching, so a column it misses isn't masked. And summary statistics, such as the earliest and latest value of a date column, are still shown. Skim the [Personal & sensitive data](docs/report-tour.md#-personal--sensitive-data) panel before sharing widely.
+
+</details>
+
+<details>
+<summary><b>Why isn't there a single "quality score"?</b></summary>
+<br>
+
+A blended 0–100 score hides which dimension is bad: a table can score 90 with a broken key. datascope shows each check separately, split into [table-level and column-level](docs/report-tour.md#-data-quality) results, so every number points at something you can fix.
+
+</details>
+
+<details>
+<summary><b>How much will profiling a BigQuery table cost?</b></summary>
+<br>
+
+Run `--estimate` first: it dry-runs every query (free) and prints the bytes and cost **per section**. If your organisation pays for slots, try `--sample`, which profiles 1% of the table and projects the full run's slot time. See [BigQuery costs](docs/bigquery.md#-what-it-costs).
+
+</details>
+
+<details>
+<summary><b>Some checks say "partial" or "skipped". What do I do?</b></summary>
+<br>
+
+That's the run summary telling you a limit kicked in or a check was turned off. It prints the exact flag that would extend each one, and a ready-made command that extends them all. See [the run summary](docs/settings.md#-the-run-summary).
+
+</details>
+
+<details>
+<summary><b>Which file formats are supported?</b></summary>
+<br>
+
+`.csv`, `.tsv`, `.json`, `.parquet` / `.pq` (needs `pip install pyarrow`) and `.xlsx` (needs `pip install -e ".[excel]"`). See [Getting started](docs/getting-started.md#-supported-inputs).
+
+</details>
+
+---
+
+## 🛠️ Development
+
+```bash
+pip install -e ".[dev]"     # pytest, plus DuckDB + sqlglot to run the BigQuery SQL locally
+pytest                      # the whole suite, including the BigQuery engine (no GCP needed)
+python example.py           # regenerate the demo report
 ```
-datascope data.csv --ri-parent-min-unique-pct 90 --max-correlation-cols 60
-```
 
-**Every run reports what it did and didn't check.** After a run, the
-command line prints, and the report's **Run summary** panel shows:
-
-- each check family, with its status: ran, partial (a limit kicked in),
-  skipped (turned off), listed (found but not run), not set up (needs
-  input, e.g. `--reference`), or not available on this engine;
-- the flag that would extend each partial, skipped or listed check;
-- a command that **extends** the run with all of those flags at once,
-  and one that **reproduces** it exactly;
-- every setting used, with changed values highlighted, plus the
-  datascope version.
-
-```
-Checks:
-  ✓ Column statistics                  ran           All 19 columns: nulls, distinct counts, ...
-  ◐ Personal & sensitive data detection  partial    Column names checked; values checked on a sample of 500 rows per column ...  → --sample-size 4012
-  ◐ Correlations                       partial       First 3 of 5 numeric columns.  → --max-correlation-cols 5
-  ✓ Primary-key search                 ran           No key can be unique: the table has 12 exact duplicate rows.
-  · Referential integrity (declared)   not set up    None declared.  (set up with --reference CHILD=PARENT ...)
-  ...
-
-To extend this run with every → change above:
-  datascope customers.csv --sample-size 4012 --max-correlation-cols 5
-
-To reproduce this run:
-  datascope customers.csv --sample-size 500 --max-correlation-cols 3
-```
-
-All of it is also in the returned dict: `result["meta"]["settings"]`,
-`["checks"]`, `["command"]` and `["extend_command"]`. When the data came
-from Python rather than a file, the command uses an `INPUT` placeholder.
-
-### All settings
-
-<!-- settings-table:start (generated from datascope/settings.py; tests check it is current) -->
-**Column statistics and sampling**
-
-| Flag / keyword | Default | Engines | What it does |
-|---|---|---|---|
-| `--top-n-values` / `top_n_values` | `10` | both | Most frequent values kept per column. |
-| `--histogram-bins` / `histogram_bins` | `30` | pandas | Bars in each numeric histogram. |
-| `--sample-size` / `sample_size_for_content_checks` | `1000` | pandas | Rows sampled per column when checking values for personal or sensitive data (emails, phone numbers, ID and card numbers...). Larger = slower, fewer misses. |
-| `--random-state` / `random_state` | `42` | pandas | Seed for that sample, so reruns flag the same columns. |
-| `--sensitive-min-match-pct` / `sensitive_min_match_pct` | `1` | pandas | Flag a column as personal or sensitive data when at least this % of its sampled values match a pattern (email address, phone, ID, card or bank account number), whole or, for emails and dashed ID numbers, inside text. Low by default: a column that is only partly personal data still holds personal data. Column names are checked regardless. |
-
-**Alert thresholds**
-
-| Flag / keyword | Default | Engines | What it does |
-|---|---|---|---|
-| `--missing-warning-pct` / `missing_warning_pct` | `20` | both | A column with more than this % missing raises a warning. |
-| `--missing-high-pct` / `missing_high_pct` | `50` | both | A column with more than this % missing raises a high-severity alert. |
-| `--outlier-alert-pct` / `outlier_alert_pct` | `5` | pandas | Alert when more than this % of a numeric column is outside 1.5x IQR. |
-| `--sensitive-alert-min-confidence` / `sensitive_alert_min_confidence` | `0` | both | Raise an alert for a column that looks like personal or sensitive data only at or above this detection confidence (0-1). The default 0 alerts on every flagged column; raise it to alert only on the clearest cases. Flagged columns are masked either way. |
-
-**Correlations**
-
-| Flag / keyword | Default | Engines | What it does |
-|---|---|---|---|
-| `--correlations` / `correlations` | `on` | both | Pearson correlation matrix of numeric columns (and, on pandas, the missing-value correlation matrix). On BigQuery this adds CORR() terms to the first profiling query: free for tables of up to --max-columns-per-query columns, see --estimate for the exact cost. |
-| `--max-correlation-cols` / `max_correlation_cols` | `30` | both | Correlate at most this many numeric columns (n*(n-1)/2 pairs). |
-| `--high-correlation-threshold` / `high_correlation_threshold` | `0.8` | both | Alert on column pairs with \|r\| at or above this. |
-
-**Keys and duplicates**
-
-| Flag / keyword | Default | Engines | What it does |
-|---|---|---|---|
-| `--max-pk-candidate-pool` / `max_pk_candidate_pool` | `10` | pandas | Composite primary-key search: consider this many of the most distinct no-null columns. |
-| `--max-pk-combo-size` / `max_pk_combo_size` | `3` | pandas | Composite primary-key search: try combinations of up to this many columns. |
-| `--max-duplicate-column-check` / `max_duplicate_column_check` | `100` | pandas | Skip identical-column detection on tables wider than this (every pair is compared). |
-
-**Column relationship dependencies (one column's value determines another's)**
-
-| Flag / keyword | Default | Engines | What it does |
-|---|---|---|---|
-| `--column-dependencies` / `column_dependencies` | `on` | pandas | Look for columns whose value always (or nearly always) determines another column's value, e.g. zip_code -> state: redundant columns, hidden business rules, and the rows that break them. |
-| `--dependency-min-purity` / `dependency_min_purity` | `0.98` | pandas | Report A -> B when at least this share (0-1) of the rows agree with the most common B for their A; the rest are shown as exceptions. |
-| `--dependency-min-support-rows` / `dependency_min_support_rows` | `20` | pandas | Ignore a pair of columns with fewer rows of evidence than this. |
-| `--max-dependency-candidates` / `max_dependency_candidates` | `25` | pandas | Test at most this many columns on either side of A -> B (pairs grow with the square). |
-
-**Referential integrity**
-
-| Flag / keyword | Default | Engines | What it does |
-|---|---|---|---|
-| `--suggested-references` / `suggested_references` | `auto` | both | What to do with references datascope suggests itself (same table, from column names): 'check' runs them; 'list' only lists them, with their cost on BigQuery; 'off' skips them. 'auto' = check on pandas, list on BigQuery (where each is an extra query). |
-| `--max-reference-suggestions` / `max_reference_suggestions` | `10` | both | Check or list at most this many suggested references. |
-| `--ri-parent-min-unique-pct` / `ri_parent_min_unique_pct` | `99` | both | A suggested reference's target must be an identifier column, with no NULLs and at least this % unique. Below 100 so that duplicate rows don't hide a real key; lower it for messier data. |
-| `--ri-suggest-min-match-pct` / `ri_suggest_min_match_pct` | `90` | both | Keep a suggestion only if at least this % of its rows match the target; fewer means it is probably not a reference at all. |
-| `--ri-suggest-min-rows` / `ri_suggest_min_rows` | `10` | both | Don't suggest a reference for a column with fewer non-null rows. |
-| `--ri-suggest-min-distinct` / `ri_suggest_min_distinct` | `3` | both | Don't suggest a reference for a column with fewer distinct values. |
-| `--ri-sample-orphans` / `ri_sample_orphans` | `5` | both | Example orphan values kept per check (the most frequent). |
-| `--ri-high-orphan-pct` / `ri_high_orphan_pct` | `5` | both | A declared check with more than this % orphan rows raises a high-severity alert; otherwise a warning. |
-
-**BigQuery query shape**
-
-| Flag / keyword | Default | Engines | What it does |
-|---|---|---|---|
-| `--distinct-counts` / `distinct_counts` | `keys` | BigQuery | How distinct values are counted. 'keys': approximate counts (HyperLogLog++, about 1% error) for every column, then exact counts only for columns that could be keys (no NULLs and nearly all values unique), in a second query that reads just those columns. Key and reference detection stay exact, without the heavy shuffle (slot time) of an exact COUNT(DISTINCT) on every column. 'exact': exact counts for every column, the heaviest on slots. 'approx': approximate only, the lightest; primary-key detection is then off. |
-| `--max-columns-per-query` / `max_columns_per_query` | `100` | BigQuery | Split wide tables into profiling queries of at most this many columns. |
-<!-- settings-table:end -->
-
-### Fixed heuristics
-
-These rules are not settings. They decide how a column is classified and
-when PII is suspected, and changing them means changing the code. The
-report records the datascope version, which pins them.
-
-- **Semantic type** (`semantic.py`): two distinct values → binary
-  categorical, or boolean if they look like true/false. Numeric columns
-  ≥ 95% unique with more than 20 values → identifier if the name reads as
-  an id, otherwise continuous; numeric with ≤ 20 distinct values or < 5%
-  unique → discrete categorical. Text with a `-` or `/` in most values that
-  parses as dates for > 90% of a 200-value sample → dates stored as text.
-  Text ≥ 98% unique → identifier (short values or an id-like name),
-  otherwise free text; average length > 80 characters → free text;
-  ≤ 50 distinct values or < 10% unique → categorical; otherwise
-  high-cardinality text.
-- **Personal & sensitive data detection** (`pii.py`, see above): a column is flagged when its name
-  matches a keyword list, or when at least `--sensitive-min-match-pct`
-  (default 1%) of the sampled values match a pattern: email, national ID,
-  phone, IP address, credit card (Luhn checksum) or IBAN (mod-97
-  checksum). Emails and dashed ID numbers also count when they appear
-  inside free text. Its confidence is 0.55 for a name match plus 0.5 × the
-  value match rate (+0.05 for a passed checksum), capped at 0.99;
-  `--sensitive-alert-min-confidence` (default 0: every flagged column
-  alerts) applies to that number. A bare 9- or 10-digit number has the
-  same shape as an undashed SSN or a phone number, so ID-like numbers
-  stored as text can be flagged; the stated reason makes that easy to
-  spot.
-- **Quality-rule suggestions** (`quality.py`): accepted values when the
-  top values cover ≥ 99% of rows; an outlier review when > 1% of values
-  are outside 1.5× IQR; a non-negative check when the name contains
-  count, amount, qty, quantity, price, total, age, duration, length,
-  size, score or balance.
-- **Outliers** are values outside 1.5× the interquartile range.
-- **Column relationship dependencies** (`relationships.py`): near-unique (≥ 99%
-  unique) and constant columns are left out of the search; only
-  determinant values that repeat count as evidence; up to 5 counter-example
-  rows are kept per dependency.
-- **Alerts**: at most 8 correlated pairs and 8 dependencies become alerts
-  (the panels list them all).
-
-## What it computes, per column
-
-- **Summary stats** — count, missing %, unique %, memory; numeric: mean,
-  std, quartiles, skew, kurtosis, zero/negative counts, 1.5×IQR outliers,
-  infinite-value detection; string: length distribution; datetime: range,
-  weekday distribution, future-dated values; boolean: true/false split.
-- **Semantic type** — identifier, categorical, continuous/discrete
-  numeric, free text, boolean, datetime (including dates stored as
-  text), driven mainly by how *unique* the column is relative to row
-  count, with dtype and column-name hints layered on top.
-- **Personal & sensitive data detection**: flags columns that look like
-  they hold *personal data* (PII, personally identifiable information:
-  names, email addresses, phone numbers, postal addresses, national ID
-  numbers, dates of birth), *health data* (PHI: medical records,
-  diagnoses, medication) or *payment data* (PCI: card and bank account
-  numbers). It checks the column name, and a sample of values against
-  patterns (email, phone, national ID, IP address, credit card and IBAN,
-  both checksum-validated). Even a column where only a few values match
-  is flagged (`--sensitive-min-match-pct`, default 1%), as is free text
-  that contains email addresses or ID numbers, and every flagged column
-  raises an alert. The report's "Personal & sensitive data" panel
-  lists each flagged column with the reason, e.g. "98% of 1,000 sampled
-  values have the format of an email address", and the values of flagged
-  columns are masked everywhere in the report. It is pattern matching to
-  point you at columns worth a review, not a compliance decision.
-- **Data quality rule suggestions** — not-null, uniqueness, accepted
-  values, range checks, outlier/negative/future-date flags — plus a
-  ready-to-paste **dbt `schema.yml`** test block per column.
-
-## Dataset-level
-
-- A **data quality** section that keeps table-level checks (completeness,
-  duplicate rows) apart from column-level checks (columns with missing
-  values, constant columns), each with its own alerts — no blended score
-- Numeric correlation matrix and a **missing-value correlation matrix**
-  (which columns tend to be null together — useful for spotting a shared
-  upstream cause)
-- Exact duplicate-row detection
-- Primary-key candidate detection (single column, and a bounded search
-  over identifier-like columns for composite keys)
-- **Column relationship dependencies**: does one column's value determine
-  another's, e.g. `zip_code -> state`? That can reveal a redundant column,
-  an undocumented business rule, or the few rows that break the rule. A
-  bounded, evidence-weighted search reports exact and near dependencies,
-  with the rows that break the rule for anything short of 100%. (In
-  database terms these are functional dependencies.)
-- **Referential-integrity checks**, declared (same table or another
-  table) or suggested from column names — see above
-- An alerts panel surfacing all of the above at a glance
-
-## Notes / assumptions
-
-- The request that generated this said "PII or PSI" — there's no
-  standard governance term "PSI", so this treats it as PHI (Protected
-  Health Information), the usual pairing with PII. Categories are plain
-  data in `pii.py` — easy to rename or extend if something else was meant.
-- Value checks for personal data sample up to 1,000 rows per column by
-  default (`DataProfiler(sample_size_for_content_checks=...)` to change).
-- Every suggestion (quality rules, dbt tests, accepted-value lists) is a
-  heuristic starting point learned from one snapshot of the data — review
-  before enforcing anything in production.
-- Only aggregated stats/histograms are embedded in the HTML, never raw
-  rows, so file size stays reasonable regardless of dataset size.
-
-## Files
+<details>
+<summary><b>🗂️ Project layout</b></summary>
 
 ```
 src/datascope/
-  core.py          DataProfiler class, orchestration, correlations, PK search
-  stats.py         numeric/string/datetime/boolean stat + histogram calculators
-  semantic.py      semantic type inference
-  pii.py           personal & sensitive data detection (PII/PHI/PCI) + value masking
-  quality.py       quality-rule + dbt-snippet recommendations
-  relationships.py column relationship dependencies (column A determines column B)
-  referential.py   referential-integrity checks (declared and suggested references)
-  settings.py      every tunable threshold: defaults, validation, CLI flags and help
-  run_summary.py   what each run checked or left out, and the reproduce/extend commands
-  html_report.py   renders the profile dict to the HTML dashboard
-  bigquery.py      BigQuery engine: generates profiling SQL, maps results to the profile dict
-  cli.py / __main__.py   `datascope` / `python -m datascope` (flags generated from settings.py)
-tests/              pytest suite (duckdb_bigquery.py runs the generated BigQuery SQL on DuckDB)
-example.py          synthetic messy dataset + runnable demo
+├── core.py           DataProfiler: orchestration, correlations, keys, alerts
+├── bigquery.py       BigQuery engine: generates the SQL, maps results to the profile dict
+├── stats.py          numeric / text / date / boolean statistics and histograms
+├── semantic.py       semantic type inference (identifier, categorical, free text, ...)
+├── pii.py            personal & sensitive data detection, value masking
+├── quality.py        quality-rule suggestions and dbt test snippets
+├── relationships.py  column relationship dependencies (A determines B)
+├── referential.py    referential-integrity checks (declared and suggested)
+├── settings.py       every tunable threshold: defaults, validation, CLI flags, help
+├── run_summary.py    what each run checked or left out, reproduce/extend commands
+├── html_report.py    renders the profile dict into the HTML report
+└── cli.py            the `datascope` command (flags generated from settings.py)
+tests/                pytest suite; duckdb_bigquery.py runs the generated BigQuery SQL on DuckDB
+docs/                 the documentation you're reading
+example.py            synthetic messy dataset + runnable demo
 ```
 
-## Development
+</details>
 
-```
-pip install -e ".[dev]"
-pytest
-```
+The settings table in [docs/settings.md](docs/settings.md#-all-settings) is generated from `settings.py`, and a test fails if it goes stale. Regenerate it with `python -c "from datascope.settings import settings_markdown; print(settings_markdown())"`.
+
+<div align="center">
+<br>
+<sub>Made for people who'd rather understand their data than guess at it. 🔭</sub>
+</div>
