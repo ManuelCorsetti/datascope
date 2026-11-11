@@ -235,7 +235,8 @@ counts distinct values exactly for the few columns that could be keys
   ```
 - Not computed yet (each needs extra passes over the data): histograms,
   outlier counts, skew/kurtosis, duplicate rows, composite
-  keys, functional dependencies, and detecting dates stored as text.
+  keys, column relationship dependencies, and detecting dates stored as
+  text.
 - Personal & sensitive data is detected by **column name only**: checking
   values would mean pulling them out of the warehouse.
 - Cost: a table is scanned once (wide tables are split into queries of
@@ -345,14 +346,14 @@ from Python rather than a file, the command uses an `INPUT` placeholder.
 | `--max-pk-combo-size` / `max_pk_combo_size` | `3` | pandas | Composite primary-key search: try combinations of up to this many columns. |
 | `--max-duplicate-column-check` / `max_duplicate_column_check` | `100` | pandas | Skip identical-column detection on tables wider than this (every pair is compared). |
 
-**Functional dependencies (column A determines column B)**
+**Column relationship dependencies (one column's value determines another's)**
 
 | Flag / keyword | Default | Engines | What it does |
 |---|---|---|---|
-| `--functional-dependencies` / `functional_dependencies` | `on` | pandas | Search for column A -> column B dependencies (zip -> state). |
-| `--fd-min-purity` / `fd_min_purity` | `0.98` | pandas | Report A -> B when at least this share (0-1) of evidence rows agree with the majority B for their A. |
-| `--fd-min-support-rows` / `fd_min_support_rows` | `20` | pandas | Ignore a pair with fewer evidence rows than this. |
-| `--max-fd-candidate-pool` / `max_fd_candidate_pool` | `25` | pandas | Test at most this many columns as either side (pairs grow with the square). |
+| `--column-dependencies` / `column_dependencies` | `on` | pandas | Look for columns whose value always (or nearly always) determines another column's value, e.g. zip_code -> state: redundant columns, hidden business rules, and the rows that break them. |
+| `--dependency-min-purity` / `dependency_min_purity` | `0.98` | pandas | Report A -> B when at least this share (0-1) of the rows agree with the most common B for their A; the rest are shown as exceptions. |
+| `--dependency-min-support-rows` / `dependency_min_support_rows` | `20` | pandas | Ignore a pair of columns with fewer rows of evidence than this. |
+| `--max-dependency-candidates` / `max_dependency_candidates` | `25` | pandas | Test at most this many columns on either side of A -> B (pairs grow with the square). |
 
 **Referential integrity**
 
@@ -409,7 +410,7 @@ report records the datascope version, which pins them.
   count, amount, qty, quantity, price, total, age, duration, length,
   size, score or balance.
 - **Outliers** are values outside 1.5× the interquartile range.
-- **Functional dependencies** (`relationships.py`): near-unique (≥ 99%
+- **Column relationship dependencies** (`relationships.py`): near-unique (≥ 99%
   unique) and constant columns are left out of the search; only
   determinant values that repeat count as evidence; up to 5 counter-example
   rows are kept per dependency.
@@ -456,9 +457,12 @@ report records the datascope version, which pins them.
 - Exact duplicate-row detection
 - Primary-key candidate detection (single column, and a bounded search
   over identifier-like columns for composite keys)
-- Functional dependency detection (does column A determine column B, e.g.
-  `zip -> state`? — a bounded, evidence-weighted search flags near- and
-  exact dependencies, with counter-example rows for anything short of 100%)
+- **Column relationship dependencies**: does one column's value determine
+  another's, e.g. `zip_code -> state`? That can reveal a redundant column,
+  an undocumented business rule, or the few rows that break the rule. A
+  bounded, evidence-weighted search reports exact and near dependencies,
+  with the rows that break the rule for anything short of 100%. (In
+  database terms these are functional dependencies.)
 - **Referential-integrity checks**, declared (same table or another
   table) or suggested from column names — see above
 - An alerts panel surfacing all of the above at a glance
@@ -486,7 +490,7 @@ src/datascope/
   semantic.py      semantic type inference
   pii.py           personal & sensitive data detection (PII/PHI/PCI) + value masking
   quality.py       quality-rule + dbt-snippet recommendations
-  relationships.py functional dependency detection (column A -> column B)
+  relationships.py column relationship dependencies (column A determines column B)
   referential.py   referential-integrity checks (declared and suggested references)
   settings.py      every tunable threshold: defaults, validation, CLI flags and help
   run_summary.py   what each run checked or left out, and the reproduce/extend commands

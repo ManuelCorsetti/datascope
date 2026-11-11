@@ -83,8 +83,6 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Dry-run everything and print the bytes and approximate cost per section "
                          "(profiling, correlations, each reference check). Runs and bills nothing.")
     bq.add_argument("--print-sql", action="store_true", help="Print the SQL that would run, and exit")
-    bq.add_argument("--approx-distinct", action="store_const", const="approx", dest="distinct_counts",
-                    default=argparse.SUPPRESS, help="Same as --distinct-counts approx")
 
     groups = {}
     for key, title in GROUPS:

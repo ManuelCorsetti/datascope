@@ -30,10 +30,6 @@ class TestSettings:
         with pytest.raises(TypeError, match="Unknown setting"):
             DataProfiler(not_a_setting=1)
 
-    def test_old_keywords_still_work(self):
-        p = DataProfiler(max_correlation_cols=5, suggest_references=False)
-        assert p.max_correlation_cols == 5 and p.settings.suggested_references == "off"
-
     def test_auto_mode_resolves_per_engine(self):
         assert Settings().suggested_reference_mode("pandas") == "check"
         assert Settings().suggested_reference_mode("bigquery") == "list"
@@ -74,10 +70,11 @@ class TestThresholdsAreHonoured:
 
     def test_switches(self):
         df = pd.DataFrame({"a": range(50), "b": np.arange(50) * 2.0, "c": [1, 2] * 25})
-        r = DataProfiler(correlations=False, functional_dependencies=False).profile(df)
-        assert r["correlations"] is None and r["missing_correlation"] is None and r["functional_dependencies"] == []
+        r = DataProfiler(correlations=False, column_dependencies=False).profile(df)
+        assert r["correlations"] is None and r["missing_correlation"] is None and r["column_dependencies"] == []
         assert _check(r, "correlations")["status"] == "skipped"
-        assert _check(r, "fd")["flags"] == ["--functional-dependencies"]
+        assert _check(r, "dependencies")["flags"] == ["--column-dependencies"]
+        assert _check(r, "dependencies")["name"] == "Column relationship dependencies"
 
 
 class TestRunSummary:
@@ -131,10 +128,10 @@ def test_pk_search_is_not_extended_when_duplicate_rows_make_keys_impossible():
 def test_cli_run_prints_summary_and_reproducible_command(tmp_path, monkeypatch, capsys):
     path = tmp_path / "d.csv"
     pd.DataFrame({f"n{i}": np.random.default_rng(i).normal(size=40) for i in range(4)}).to_csv(path, index=False)
-    main([str(path), "-o", str(tmp_path / "r.html"), "--max-correlation-cols", "2", "--no-functional-dependencies"])
+    main([str(path), "-o", str(tmp_path / "r.html"), "--max-correlation-cols", "2", "--no-column-dependencies"])
     out = capsys.readouterr().out
     assert "◐ Correlations" in out and "→ --max-correlation-cols 4" in out
-    assert f"datascope {path} --max-correlation-cols 2 --no-functional-dependencies" in out
+    assert f"datascope {path} --max-correlation-cols 2 --no-column-dependencies" in out
     with pytest.raises(SystemExit):
         main([str(path), "--ri-parent-min-unique-pct", "150"])
     assert "ri_parent_min_unique_pct" in capsys.readouterr().err

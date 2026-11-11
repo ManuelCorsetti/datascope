@@ -32,7 +32,7 @@ GROUPS: List[Tuple[str, str]] = [
     ("alerts", "Alert thresholds"),
     ("correlations", "Correlations"),
     ("keys", "Keys and duplicates"),
-    ("fd", "Functional dependencies (column A determines column B)"),
+    ("fd", "Column relationship dependencies (one column's value determines another's)"),
     ("ri", "Referential integrity"),
     ("bigquery", "BigQuery query shape"),
 ]
@@ -104,13 +104,17 @@ class Settings:
                                               "(every pair is compared).", "keys", PANDAS, minimum=0)
 
     # ---------------------------------------------------------------- fd
-    functional_dependencies: bool = _s(True, "Search for column A -> column B dependencies (zip -> state).", "fd",
-                                       PANDAS)
-    fd_min_purity: float = _s(0.98, "Report A -> B when at least this share (0-1) of evidence rows agree with "
-                                    "the majority B for their A.", "fd", PANDAS, minimum=0, maximum=1)
-    fd_min_support_rows: int = _s(20, "Ignore a pair with fewer evidence rows than this.", "fd", PANDAS, minimum=1)
-    max_fd_candidate_pool: int = _s(25, "Test at most this many columns as either side (pairs grow with the "
-                                        "square).", "fd", PANDAS, minimum=2)
+    column_dependencies: bool = _s(
+        True, "Look for columns whose value always (or nearly always) determines another column's value, "
+              "e.g. zip_code -> state: redundant columns, hidden business rules, and the rows that break them.",
+        "fd", PANDAS)
+    dependency_min_purity: float = _s(0.98, "Report A -> B when at least this share (0-1) of the rows agree with the "
+                                    "most common B for their A; the rest are shown as exceptions.", "fd", PANDAS,
+                              minimum=0, maximum=1)
+    dependency_min_support_rows: int = _s(20, "Ignore a pair of columns with fewer rows of evidence than this.", "fd", PANDAS,
+                                  minimum=1)
+    max_dependency_candidates: int = _s(25, "Test at most this many columns on either side of A -> B (pairs grow with "
+                                        "the square).", "fd", PANDAS, minimum=2)
 
     # ---------------------------------------------------------------- ri
     suggested_references: str = _s(
@@ -231,16 +235,7 @@ def default_of(name: str) -> Any:
 
 
 def resolve(settings: Optional[Settings], overrides: Dict[str, Any]) -> Settings:
-    """Settings from an optional base plus keyword overrides. Accepts the
-    older keywords `suggest_references=True/False` and
-    `exact_distinct=True/False` (= distinct_counts "exact" / "approx")."""
-    overrides = dict(overrides)
-    if "exact_distinct" in overrides:
-        flag = overrides.pop("exact_distinct")
-        overrides.setdefault("distinct_counts", "exact" if flag else "approx")
-    if "suggest_references" in overrides:
-        flag = overrides.pop("suggest_references")
-        overrides.setdefault("suggested_references", "auto" if flag else "off")
+    """Settings from an optional base plus keyword overrides."""
     return (settings or Settings()).updated(**overrides)
 
 

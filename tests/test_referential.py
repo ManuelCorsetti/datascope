@@ -63,7 +63,7 @@ class TestDeclared:
         assert len(r["sample_orphans"]) <= 5
 
     def test_label_tuple_and_same_table_name(self, orders):
-        result = DataProfiler(suggest_references=False).profile(orders, references={
+        result = DataProfiler(suggested_references="off").profile(orders, references={
             "customer_id": ("crm.customers.id", pd.Series(range(1, 1000))),
             "parent_order_id": "order_id",
         })
@@ -137,7 +137,7 @@ class TestSuggested:
         assert [r["source"] for r in result["referential_integrity"]] == ["declared"]
 
     def test_can_be_turned_off(self, orders):
-        assert DataProfiler(suggest_references=False).profile(orders)["referential_integrity"] == []
+        assert DataProfiler(suggested_references="off").profile(orders)["referential_integrity"] == []
 
 
 def test_cli_reference_to_another_file(tmp_path, monkeypatch, capsys):

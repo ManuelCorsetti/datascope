@@ -329,7 +329,7 @@ class TestProfileShape:
 
     def test_approx_distinct_never_exceeds_row_count_and_skips_pk(self, canned):
         canned.row["c0__distinct"] = 1012  # HLL overshoot
-        result = BigQueryProfiler(client=canned, exact_distinct=False).profile(table="proj.sales.orders")
+        result = BigQueryProfiler(client=canned, distinct_counts="approx").profile(table="proj.sales.orders")
         assert result["columns"][0]["unique"] == 1000
         assert result["pk_candidates"] == []
 
@@ -605,7 +605,7 @@ class TestExecutedAgainstRealData:
     def test_approximate_distinct_is_close(self, warehouse):
         client, df = warehouse
         result = profile_bigquery("demo.shop.customers", columns=["customer_id"], client=client,
-                                  output_html=None, exact_distinct=False)
+                                  output_html=None, distinct_counts="approx")
         assert result["columns"][0]["unique"] == pytest.approx(len(df), rel=0.05)
 
     def test_empty_table(self, warehouse, tmp_path):
@@ -712,10 +712,6 @@ class TestDistinctCountModes:
         assert approx["pk_candidates"] == [] and approx["meta"]["exact_distinct_columns"] == []
         pk = next(c for c in approx["meta"]["checks"] if c["id"] == "pk")
         assert pk["status"] == "skipped" and pk["flags"] == ["--distinct-counts", "keys"]
-
-    def test_old_keyword_still_works(self, canned):
-        assert BigQueryProfiler(client=canned, exact_distinct=False).settings.distinct_counts == "approx"
-        assert BigQueryProfiler(client=canned, exact_distinct=True).settings.distinct_counts == "exact"
 
     def test_usage_reports_slot_time_and_shuffle(self, canned):
         class Stage:

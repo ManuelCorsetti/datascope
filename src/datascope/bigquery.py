@@ -27,7 +27,7 @@ split for booleans, and Pearson correlations between numeric columns
 anti-join query per declared or suggested reference — see
 `references=`). What it deliberately does not (each would need
 extra passes over the data): histograms, outlier counts,
-duplicate-row detection, composite keys, functional dependencies, and
+duplicate-row detection, composite keys, column relationship dependencies, and
 content-based PII detection (PII is flagged from column names only).
 """
 from __future__ import annotations
@@ -402,12 +402,6 @@ class BigQueryProfiler:
         self.location = location
         self.maximum_bytes_billed = maximum_bytes_billed
 
-    def __getattr__(self, name: str) -> Any:
-        # Old attribute names (profiler.top_n_values) read through.
-        settings = self.__dict__.get("settings")
-        if settings is not None and name in Settings.__dataclass_fields__:
-            return getattr(settings, name)
-        raise AttributeError(name)
 
     # ------------------------------------------------------------ client
     @property
@@ -856,7 +850,7 @@ class BigQueryProfiler:
             "pk_candidates": pk_candidates,
             "high_correlation_pairs": high_correlation_pairs,
             "duplicate_columns": [],
-            "functional_dependencies": [],
+            "column_dependencies": [],
             "referential_integrity": referential_integrity,
             "reference_suggestions": reference_suggestions,
         }
@@ -972,7 +966,7 @@ class BigQueryProfiler:
                 continue
             top_values.append({"value": str(value)[:200], "count": int(count),
                                "pct": round(100 * count / n_rows, 2) if n_rows else 0.0})
-        top_values = top_values[: self.top_n_values]
+        top_values = top_values[: self.settings.top_n_values]
         if top_values and top_values[0]["count"] <= 1 and n_rows > 1:
             # Every value occurs once: a "top 10" would just be ten
             # arbitrary raw values, so show none.

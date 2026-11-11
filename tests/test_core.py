@@ -24,7 +24,7 @@ class TestProfileStructure:
         result = DataProfiler().profile(sample_df, source_name="test")
         for key in ("meta", "overview", "columns", "correlations", "missing_correlation",
                     "pk_candidates", "high_correlation_pairs", "duplicate_columns",
-                    "functional_dependencies"):
+                    "column_dependencies"):
             assert key in result
 
     def test_meta_counts_correct(self, sample_df):

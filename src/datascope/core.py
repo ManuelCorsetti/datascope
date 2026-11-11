@@ -20,7 +20,7 @@ from .semantic import infer_semantic_type
 from .pii import detect_sensitive_data, mask_value
 from .quality import recommend_rules, generate_dbt_snippet
 from .referential import Reference, alerts_for, find_referential_integrity
-from .relationships import _candidate_pool, find_functional_dependencies
+from .relationships import _candidate_pool, find_column_dependencies
 from .run_summary import finish as finish_run_summary, pandas_checks
 from .settings import PANDAS, Settings, resolve
 from .html_report import render_html
@@ -33,20 +33,12 @@ class DataProfiler:
 
     Every threshold and limit is a `Settings` field: pass `settings=`, or
     any field as a keyword (`DataProfiler(max_correlation_cols=50)`).
-    `suggest_references=False` is still accepted (same as
-    `suggested_references="off"`). The values used are recorded in
-    `result["meta"]["settings"]`.
+    The values used are recorded in `result["meta"]["settings"]`.
     """
 
     def __init__(self, settings: Optional[Settings] = None, **kwargs: Any):
         self.settings = resolve(settings, kwargs)
 
-    def __getattr__(self, name: str) -> Any:
-        # Old attribute names (profiler.max_correlation_cols) read through.
-        settings = self.__dict__.get("settings")
-        if settings is not None and name in Settings.__dataclass_fields__:
-            return getattr(settings, name)
-        raise AttributeError(name)
 
     # ---------------------------------------------------------------- load
     def _load(self, data: Union[pd.DataFrame, str]) -> pd.DataFrame:
@@ -107,10 +99,10 @@ class DataProfiler:
         pk_candidates = self._find_pk_candidates(df, column_profiles)
         high_correlation_pairs = self._high_correlation_pairs(correlations)
         duplicate_columns = self._find_duplicate_columns(df, max_cols=st.max_duplicate_column_check)
-        functional_dependencies = find_functional_dependencies(
-            df, column_profiles, min_purity=st.fd_min_purity, min_support_rows=st.fd_min_support_rows,
-            max_candidate_pool=st.max_fd_candidate_pool,
-        ) if st.functional_dependencies else []
+        column_dependencies = find_column_dependencies(
+            df, column_profiles, min_purity=st.dependency_min_purity, min_support_rows=st.dependency_min_support_rows,
+            max_candidate_pool=st.max_dependency_candidates,
+        ) if st.column_dependencies else []
         referential_integrity, reference_suggestions = find_referential_integrity(
             df, column_profiles, references, st, mode=st.suggested_reference_mode(PANDAS))
 
@@ -141,13 +133,13 @@ class DataProfiler:
             "pk_candidates": pk_candidates,
             "high_correlation_pairs": high_correlation_pairs,
             "duplicate_columns": duplicate_columns,
-            "functional_dependencies": functional_dependencies,
+            "column_dependencies": column_dependencies,
             "referential_integrity": referential_integrity,
             "reference_suggestions": reference_suggestions,
         }
         result["overview"]["alerts"] = self._build_alerts(column_profiles, duplicate_rows, n_rows,
                                                             high_correlation_pairs, duplicate_columns,
-                                                            functional_dependencies) + alerts_for(referential_integrity, st)
+                                                            column_dependencies) + alerts_for(referential_integrity, st)
 
         pk_eligible = [c for c in column_profiles if c["missing"] == 0 and c["unique"] > 1]
         checks = pandas_checks(st, {
@@ -158,7 +150,7 @@ class DataProfiler:
             "pk": {"single_found": any(p["type"] == "single" for p in pk_candidates),
                    "composite_found": any(p["type"] == "composite" for p in pk_candidates),
                    "eligible": len(pk_eligible)},
-            "fd_pool_eligible": len(_candidate_pool(column_profiles, max_pool=10 ** 9)),
+            "dependency_pool_eligible": len(_candidate_pool(column_profiles, max_pool=10 ** 9)),
             "declared": len(references or {}),
             "suggestions": reference_suggestions,
         })
@@ -201,7 +193,7 @@ class DataProfiler:
             boolean_stats = compute_boolean_stats(series)
         elif pd.api.types.is_numeric_dtype(series):
             numeric_stats = compute_numeric_stats(series)
-            histogram = compute_histogram(series, bins=self.histogram_bins)
+            histogram = compute_histogram(series, bins=self.settings.histogram_bins)
         else:
             string_stats = compute_string_stats(series)
             length_histogram = compute_length_histogram(series)
@@ -212,10 +204,10 @@ class DataProfiler:
         profile["boolean_stats"] = boolean_stats
         profile["histogram"] = histogram
         profile["length_histogram"] = length_histogram
-        profile["top_values"] = compute_top_values(series, n=self.top_n_values)
+        profile["top_values"] = compute_top_values(series, n=self.settings.top_n_values)
 
         sensitive = detect_sensitive_data(
-            series, col, sample_size=self.sample_size_for_content_checks, random_state=self.random_state,
+            series, col, sample_size=self.settings.sample_size_for_content_checks, random_state=self.settings.random_state,
             min_match_rate=self.settings.sensitive_min_match_pct / 100,
             # continuous_numeric measures (price, temperature, ...) are
             # skipped too: their str() form is a decimal expansion that
@@ -239,20 +231,20 @@ class DataProfiler:
 
     # --------------------------------------------------------- dataset-level
     def _numeric_correlation(self, df: pd.DataFrame, numeric_cols: List[str]) -> Optional[Dict[str, Any]]:
-        cols = numeric_cols[: self.max_correlation_cols]
+        cols = numeric_cols[: self.settings.max_correlation_cols]
         if len(cols) < 2:
             return None
         corr = df[cols].corr().fillna(0)
         return {
             "columns": [str(c) for c in corr.columns],
             "matrix": corr.round(3).values.tolist(),
-            "truncated": len(numeric_cols) > self.max_correlation_cols,
+            "truncated": len(numeric_cols) > self.settings.max_correlation_cols,
         }
 
     def _missing_correlation(self, df: pd.DataFrame) -> Optional[Dict[str, Any]]:
         null_matrix = df.isna().astype(int)
         cols_with_variance = [c for c in null_matrix.columns if 0 < null_matrix[c].sum() < len(df)]
-        cols_with_variance = cols_with_variance[: self.max_correlation_cols]
+        cols_with_variance = cols_with_variance[: self.settings.max_correlation_cols]
         if len(cols_with_variance) < 2:
             return None
         corr = null_matrix[cols_with_variance].corr().fillna(0)
@@ -271,9 +263,9 @@ class DataProfiler:
 
         unique_by_name = {c["name"]: c["unique"] for c in column_profiles}
         pool = [c["name"] for c in column_profiles if c["missing"] == 0 and c["unique"] > 1]
-        pool = sorted(pool, key=lambda c: -unique_by_name[c])[: self.max_pk_candidate_pool]
+        pool = sorted(pool, key=lambda c: -unique_by_name[c])[: self.settings.max_pk_candidate_pool]
 
-        for size in range(2, self.max_pk_combo_size + 1):
+        for size in range(2, self.settings.max_pk_combo_size + 1):
             for combo in combinations(pool, size):
                 if df.duplicated(subset=list(combo)).sum() == 0:
                     candidates.append({"columns": list(combo), "type": "composite"})
@@ -318,7 +310,7 @@ class DataProfiler:
     def _build_alerts(self, column_profiles: List[Dict[str, Any]], duplicate_rows: int, n_rows: int,
                        high_correlation_pairs: Optional[List[Dict[str, Any]]] = None,
                        duplicate_columns: Optional[List[List[str]]] = None,
-                       functional_dependencies: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+                       column_dependencies: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         st = self.settings
         alerts: List[Dict[str, Any]] = []
         if duplicate_rows > 0:
@@ -332,7 +324,7 @@ class DataProfiler:
         for pair in (high_correlation_pairs or [])[:8]:
             alerts.append({"severity": "info", "column": None,
                             "message": f"'{pair['col1']}' and '{pair['col2']}' are highly correlated (r={pair['correlation']})."})
-        for fd in (functional_dependencies or [])[:8]:
+        for fd in (column_dependencies or [])[:8]:
             if fd["purity"] >= 0.999999:
                 alerts.append({"severity": "info", "column": None,
                                 "message": f"'{fd['determinant']}' fully determines '{fd['dependent']}' "

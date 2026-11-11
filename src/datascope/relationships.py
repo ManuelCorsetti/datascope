@@ -59,7 +59,7 @@ def _candidate_pool(column_profiles: List[Dict[str, Any]], max_pool: int) -> Lis
     return pool[:max_pool]
 
 
-def find_functional_dependencies(
+def find_column_dependencies(
     df: pd.DataFrame,
     column_profiles: List[Dict[str, Any]],
     min_purity: float = DEFAULT_MIN_PURITY,

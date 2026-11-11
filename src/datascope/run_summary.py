@@ -111,7 +111,7 @@ def _fmt_bytes(n: float) -> str:
 # ------------------------------------------------------------ engines
 def pandas_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
     """ctx: n_cols, n_rows, duplicate_rows, max_non_null, n_numeric,
-    n_missing_corr_cols, pk (dict), fd_pool_eligible, declared, suggestions."""
+    n_missing_corr_cols, pk (dict), dependency_pool_eligible, declared, suggestions."""
     out = [check("column_stats", "Column statistics", RAN, f"All {_plural(ctx['n_cols'], 'column')}: nulls, "
                  "distinct counts, top values, numeric/text/date stats, histograms, outliers.")]
 
@@ -167,17 +167,17 @@ def pandas_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                   + ("found one." if pk["composite_found"] else "none is unique."))
         out.append(check("pk", name, PARTIAL if changes else RAN, detail, changes))
 
-    name = "Functional dependencies"
-    if not s.functional_dependencies:
-        out.append(check("fd", name, SKIPPED, "Turned off.", {"functional_dependencies": True}))
-    elif ctx["n_rows"] < s.fd_min_support_rows or ctx["fd_pool_eligible"] < 2:
-        out.append(check("fd", name, NOTHING, "Too few rows or candidate columns."))
-    elif ctx["fd_pool_eligible"] > s.max_fd_candidate_pool:
-        out.append(check("fd", name, PARTIAL, f"{s.max_fd_candidate_pool} of {ctx['fd_pool_eligible']} candidate "
+    name = "Column relationship dependencies"
+    if not s.column_dependencies:
+        out.append(check("dependencies", name, SKIPPED, "Turned off.", {"column_dependencies": True}))
+    elif ctx["n_rows"] < s.dependency_min_support_rows or ctx["dependency_pool_eligible"] < 2:
+        out.append(check("dependencies", name, NOTHING, "Too few rows or candidate columns."))
+    elif ctx["dependency_pool_eligible"] > s.max_dependency_candidates:
+        out.append(check("dependencies", name, PARTIAL, f"{s.max_dependency_candidates} of {ctx['dependency_pool_eligible']} candidate "
                          f"columns tested (lowest cardinality first).",
-                         {"max_fd_candidate_pool": ctx["fd_pool_eligible"]}))
+                         {"max_dependency_candidates": ctx["dependency_pool_eligible"]}))
     else:
-        out.append(check("fd", name, RAN, f"All {ctx['fd_pool_eligible']} candidate columns tested in both directions."))
+        out.append(check("dependencies", name, RAN, f"All {ctx['dependency_pool_eligible']} candidate columns tested in both directions."))
 
     return out + reference_checks(s, PANDAS, ctx["declared"], ctx["suggestions"])
 
@@ -209,7 +209,7 @@ def bigquery_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
     else:
         out.append(check("pk", "Primary-key search", SKIPPED, "Approximate distinct counts can't prove "
                                                               "uniqueness.", {"distinct_counts": "keys"}))
-    out.append(check("fd", "Functional dependencies", NOT_AVAILABLE, na + "."))
+    out.append(check("dependencies", "Column relationship dependencies", NOT_AVAILABLE, na + "."))
     return out + reference_checks(s, BIGQUERY, ctx["declared"], ctx["suggestions"])
 
 

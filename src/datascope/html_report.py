@@ -446,7 +446,8 @@ details.settings summary { cursor: pointer; font-family: var(--font-mono); font-
   </section>
 
   <section class="panel" id="fd-panel" style="display:none">
-    <div class="panel-title"><span class="material-symbols-outlined icon">account_tree</span>Column relationships <span class="panel-sub">functional dependencies</span></div>
+    <div class="panel-title"><span class="material-symbols-outlined icon">account_tree</span>Column relationship dependencies <span class="panel-sub">one column&rsquo;s value determines another&rsquo;s</span></div>
+    <p class="sens-intro"><b>A &rarr; B</b> means every row with the same value of A has the same value of B, like zip code &rarr; state. That can point to a redundant column (B could be looked up from A), an undocumented business rule, or, when it holds for almost all rows, the few rows that break the rule and are worth checking.</p>
     <div id="fd-list"></div>
   </section>
 
@@ -813,10 +814,10 @@ function renderPkCandidates() {
   list.innerHTML = candidates.map(c => '<div class="pk-row"><span class="pk-type">' + (c.type === 'single' ? 'Single column' : 'Composite') + '</span><span class="pk-cols">' + c.columns.map(esc).join(' + ') + '</span></div>').join('');
 }
 
-function renderFunctionalDependencies() {
+function renderColumnDependencies() {
   const panel = document.getElementById('fd-panel');
   const list = document.getElementById('fd-list');
-  const fds = PROFILE.functional_dependencies || [];
+  const fds = PROFILE.column_dependencies || [];
   if (!fds.length) { panel.style.display = 'none'; return; }
   panel.style.display = '';
   list.innerHTML = fds.map(fd => {
@@ -1205,7 +1206,7 @@ renderTypeDistribution();
 renderCorrelation();
 renderMissingCorr();
 renderPkCandidates();
-renderFunctionalDependencies();
+renderColumnDependencies();
 renderReferentialIntegrity();
 renderRunSummary();
 renderFilterChips();
