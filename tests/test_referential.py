@@ -150,9 +150,10 @@ def test_cli_reference_to_another_file(tmp_path, monkeypatch, capsys):
                                      "--reference", f"customer_id={tmp_path / 'customers.csv'}:id"])
     main()
     html = out.read_text(encoding="utf-8")
-    assert f'"references": "{tmp_path / 'customers.csv'}:id"' in html and '"orphans": 1' in html
+    parent = f"{tmp_path / 'customers.csv'}:id"
+    assert f'"references": "{parent}"' in html and '"orphans": 1' in html
     # the label is the path as typed, so the printed command repeats the run
-    assert f"--reference customer_id={tmp_path / 'customers.csv'}:id" in capsys.readouterr().out
+    assert f"--reference customer_id={parent}" in capsys.readouterr().out
 
     monkeypatch.setattr("sys.argv", ["datascope", str(tmp_path / "orders.csv"), "--reference", "customer_id"])
     with pytest.raises(SystemExit):
