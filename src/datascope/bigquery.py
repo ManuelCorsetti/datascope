@@ -22,25 +22,34 @@ Just want the SQL, to read it or run it yourself?
 What this basic engine covers: row count, nulls, distinct counts, top
 values, min / max / mean / std / sum / quartiles (median) for numbers,
 length stats for strings, range + weekday split for dates, true/false
-split for booleans. What it deliberately does not (each would need
-extra passes over the data): histograms, outlier counts, correlations,
-duplicate-row detection, composite keys, functional dependencies, and
+split for booleans, and Pearson correlations between numeric columns
+(CORR() in the same scan), and referential-integrity checks (one small
+anti-join query per declared or suggested reference — see
+`references=`). What it deliberately does not (each would need
+extra passes over the data): histograms, outlier counts,
+duplicate-row detection, composite keys, column relationship dependencies, and
 content-based PII detection (PII is flagged from column names only).
 """
 from __future__ import annotations
 
 import os
 import re
+import time
 import warnings
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from itertools import combinations
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from .core import DataProfiler
+from .core import DataProfiler, _version
 from .html_report import render_html
 from .pii import detect_sensitive_data, mask_value
-from .quality import compute_quality_score, generate_dbt_snippet, recommend_rules
+from .quality import generate_dbt_snippet, recommend_rules
+from .referential import (alerts_for, build_result, keep_suggestion, name_suggests_reference, suggestion_entry,
+                          suggestion_pairs)
+from .run_summary import bigquery_checks, finish as finish_run_summary
+from .settings import BIGQUERY, KEY_RECOUNT_MARGIN_PCT, Settings, resolve
 from .semantic import infer_semantic_type_from_summary
 from .stats import _safe_float
 
@@ -113,6 +122,26 @@ def _query_from_clause(query: str) -> str:
     return "(\n" + q + "\n)"
 
 
+def _numeric_value(name: str, field_type: str) -> str:
+    """A numeric column as FLOAT64 with NaN / +-inf turned into NULL, so
+    they can't poison an aggregate. FLOAT64 also keeps SUM from
+    overflowing INT64 and keeps NUMERIC results out of Decimal."""
+    c = quote_identifier(name)
+    if field_type.upper() in _FLOAT_TYPES:
+        return f"IF(IS_NAN({c}) OR IS_INF({c}), NULL, {c})"
+    return f"CAST({c} AS FLOAT64)"
+
+
+def correlation_expressions(numeric: Sequence[Tuple[int, str, str]]) -> List[Tuple[str, str]]:
+    """(result_alias, CORR expression) for every pair of `numeric`
+    columns, given as (field index, name, bigquery_type). CORR skips rows
+    where either side is NULL — pairwise-complete, like pandas."""
+    return [
+        (f"corr__{i}__{j}", f"CORR({_numeric_value(a, ta)}, {_numeric_value(b, tb)})")
+        for (i, a, ta), (j, b, tb) in combinations(numeric, 2)
+    ]
+
+
 def _column_expressions(alias: str, name: str, field_type: str, mode: str,
                         top_n: int, exact_distinct: bool) -> List[Tuple[str, str]]:
     """(result_column_alias, sql_expression) pairs for one column."""
@@ -139,15 +168,10 @@ def _column_expressions(alias: str, name: str, field_type: str, mode: str,
         add("distinct", f"APPROX_COUNT_DISTINCT({distinct_arg})")
 
     if kind == "numeric":
+        x = _numeric_value(name, field_type)
         if t in _FLOAT_TYPES:
-            # NaN / +-inf would poison every aggregate below.
-            x = f"IF(IS_NAN({c}) OR IS_INF({c}), NULL, {c})"
             add("infinite", f"COUNTIF(IS_INF({c}))")
             add("nan", f"COUNTIF(IS_NAN({c}))")
-        else:
-            # FLOAT64 keeps SUM from overflowing INT64 and keeps
-            # NUMERIC results out of Decimal.
-            x = f"CAST({c} AS FLOAT64)"
         add("min", f"MIN({x})")
         add("max", f"MAX({x})")
         add("mean", f"AVG({x})")
@@ -190,13 +214,15 @@ def build_profile_sql(
     top_n_values: int = 10,
     exact_distinct: bool = True,
     alias_offset: int = 0,
+    extra: Sequence[Tuple[str, str]] = (),
 ) -> str:
     """The profiling query: one scan, one result row.
 
     `from_clause` is a quoted table or a parenthesised subquery; `fields`
     is (name, bigquery_type, mode) per column. Result columns are named
     `c<i>__<metric>` (plus `n_rows`), where i is the column's position
-    in `fields` offset by `alias_offset`.
+    in `fields` offset by `alias_offset`. `extra` is further
+    (result_alias, expression) pairs, e.g. `correlation_expressions`.
     """
     lines = ["  COUNT(*) AS n_rows"]
     for i, (name, field_type, mode) in enumerate(fields):
@@ -204,12 +230,62 @@ def build_profile_sql(
         lines.append(f"  -- {name.replace(chr(10), ' ')} ({field_type}{' ' + mode if (mode or '').upper() == 'REPEATED' else ''})")
         for result_alias, expr in _column_expressions(alias, name, field_type, mode, top_n_values, exact_distinct):
             lines.append(f"  {expr} AS {result_alias}")
+    if extra:
+        lines.append("  -- correlations between numeric columns")
+        lines.extend(f"  {expr} AS {result_alias}" for result_alias, expr in extra)
     body = []
     for i, line in enumerate(lines):
         is_comment = line.lstrip().startswith("--")
         last_expr = not any(not l.lstrip().startswith("--") for l in lines[i + 1:])
         body.append(line if (is_comment or last_expr) else line + ",")
     return "SELECT\n" + "\n".join(body) + f"\nFROM {from_clause} AS _datascope_src"
+
+
+def build_reference_sql(child_from: str, child_col: str, parent_from: str, parent_col: str,
+                        as_text: bool = False, sample: int = 5) -> str:
+    """Referential-integrity check as one anti-join: child values (NULLs
+    excluded) with no match among the parent's distinct values. Returns
+    at most `sample` rows — the most frequent orphan values — each also
+    carrying the totals (`orphans` rows, `orphan_values` distinct), so
+    no rows back means no orphans."""
+    c, p = quote_identifier(child_col), quote_identifier(parent_col)
+    cv = f"CAST({c} AS STRING)" if as_text else c
+    pv = f"CAST({p} AS STRING)" if as_text else p
+    return (
+        "SELECT\n"
+        "  CAST(child.v AS STRING) AS value,\n"
+        "  COUNT(*) AS n,\n"
+        "  SUM(COUNT(*)) OVER () AS orphans,\n"
+        "  COUNT(*) OVER () AS orphan_values\n"
+        f"FROM (SELECT {cv} AS v FROM {child_from} AS _datascope_src WHERE {c} IS NOT NULL) AS child\n"
+        f"LEFT JOIN (SELECT DISTINCT {pv} AS v FROM {parent_from} AS _datascope_ref WHERE {p} IS NOT NULL) AS parent\n"
+        "  ON child.v = parent.v\n"
+        "WHERE parent.v IS NULL\n"
+        "GROUP BY child.v\n"
+        "ORDER BY n DESC, value\n"
+        f"LIMIT {int(sample)}"
+    )
+
+
+class _RefCheck(NamedTuple):
+    child: str            # profiled column name
+    parent: str           # parent column name
+    label: str            # how the parent is named in the report
+    source: str           # "declared" | "suggested"
+    same_table: bool
+    sql: str
+    as_text: bool = False  # child and parent types differ: compared as STRING
+
+
+class _Plan(NamedTuple):
+    fields: List[Tuple[str, str, str]]
+    sqls: List[str]
+    num_bytes: Optional[int]
+    default_name: str
+    skipped: List[Dict[str, Any]]
+    ref_checks: List[_RefCheck]
+    from_clause: str
+    corr_free_first: Optional[str]  # first profiling query without CORR() terms, for pricing them
 
 
 # BigQuery on-demand list price (US multi-region), USD per TiB scanned.
@@ -224,6 +300,56 @@ def format_bytes(n: float) -> str:
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.2f} {unit}"
         n /= 1024
     return f"{n:.2f} TB"  # pragma: no cover
+
+
+def _job_usage(job: Any) -> Dict[str, Optional[int]]:
+    """Bytes processed, slot milliseconds and bytes shuffled between query
+    stages, as BigQuery reports them on a finished job (None if unknown).
+    On-demand pricing bills the bytes; capacity (slot) pricing bills slot
+    time, which shuffle-heavy queries drive up."""
+    plan = getattr(job, "query_plan", None) or []
+    shuffle = sum(int(getattr(stage, "shuffle_output_bytes", 0) or 0) for stage in plan) if plan else None
+    slot_ms = getattr(job, "slot_millis", None)
+    return {"bytes_processed": int(getattr(job, "total_bytes_processed", None) or 0),
+            "slot_ms": int(slot_ms) if slot_ms is not None else None,
+            "shuffle_bytes": shuffle}
+
+
+def _usage_text(usage: Dict[str, Optional[int]]) -> str:
+    parts = [f"{format_bytes(usage['bytes_processed'] or 0)} processed"]
+    if usage.get("slot_ms") is not None:
+        parts.append(f"{usage['slot_ms'] / 1000:,.1f} slot-seconds")
+    if usage.get("shuffle_bytes") is not None:
+        parts.append(f"{format_bytes(usage['shuffle_bytes'])} shuffled")
+    return ", ".join(parts)
+
+
+DEFAULT_SAMPLE_PERCENT = 1.0
+DEFAULT_SAMPLE_MAX_ROWS = 1_000_000
+
+
+def sample_query(table: str, percent: float = DEFAULT_SAMPLE_PERCENT,
+                 max_rows: int = DEFAULT_SAMPLE_MAX_ROWS) -> str:
+    """SELECT * from a random `percent` of the table's storage blocks
+    (TABLESAMPLE SYSTEM: only those blocks are read and billed), capped at
+    `max_rows` rows. Each run picks a different sample."""
+    if not 0 < percent <= 100:
+        raise ValueError(f"sample percent must be > 0 and <= 100, got {percent!r}")
+    if max_rows < 1:
+        raise ValueError(f"sample max rows must be >= 1, got {max_rows!r}")
+    return (f"SELECT * FROM {_table_from_clause(table)} TABLESAMPLE SYSTEM ({percent:g} PERCENT) "
+            f"LIMIT {int(max_rows)}")
+
+
+def build_distinct_sql(from_clause: str, columns: Sequence[Tuple[int, str, str, str]]) -> str:
+    """Exact distinct counts for a few columns (field index, name, type,
+    mode), as `c<i>__distinct`: the second step of distinct_counts="keys"."""
+    exprs = []
+    for i, name, field_type, mode in columns:
+        c = quote_identifier(name)
+        arg = f"TO_JSON_STRING({c})" if _column_kind(field_type, mode, name) == "complex" else c
+        exprs.append(f"  COUNT(DISTINCT {arg}) AS c{i}__distinct")
+    return "SELECT\n" + ",\n".join(exprs) + f"\nFROM {from_clause} AS _datascope_src"
 
 
 class UnsupportedColumnWarning(UserWarning):
@@ -242,12 +368,21 @@ class BigQueryProfiler:
     client : google.cloud.bigquery.Client, optional
         Reused if given; otherwise one is created from `project` /
         `location` and your default Google credentials.
-    top_n_values : most-frequent values kept per column (0 disables).
-    exact_distinct : COUNT(DISTINCT) when True (exact, heavier on very
-        large tables); APPROX_COUNT_DISTINCT (HyperLogLog++) when False.
-    max_columns_per_query : wide tables are split into several queries
-        of at most this many columns each.
     maximum_bytes_billed : safety cap passed to every query job.
+    settings : datascope.Settings, optional
+        Thresholds and limits. Any Settings field can also be passed as
+        a keyword, e.g. `distinct_counts="approx"`, `correlations=False`,
+        `max_columns_per_query=50`, `suggested_references="check"`.
+
+    Suggested references default to "list" on this engine: after the
+    profiling query, plausible same-table references are listed with the
+    cost of checking each (a free dry run), but not run. Declared
+    `references` always run.
+
+    progress : callable(str), optional
+        Called with a line of text as each step starts and finishes
+        (query started with its job ID, then time and bytes processed).
+        The CLI prints these to stderr.
     """
 
     def __init__(
@@ -255,20 +390,18 @@ class BigQueryProfiler:
         client: Any = None,
         project: Optional[str] = None,
         location: Optional[str] = None,
-        top_n_values: int = 10,
-        exact_distinct: bool = True,
-        max_columns_per_query: int = 100,
         maximum_bytes_billed: Optional[int] = None,
+        settings: Optional[Settings] = None,
+        progress: Optional[Callable[[str], None]] = None,
+        **kwargs: Any,
     ):
-        if max_columns_per_query < 1:
-            raise ValueError("max_columns_per_query must be >= 1")
+        self.settings = resolve(settings, kwargs)
+        self.progress = progress
         self._client = client
         self.project = project
         self.location = location
-        self.top_n_values = top_n_values
-        self.exact_distinct = exact_distinct
-        self.max_columns_per_query = max_columns_per_query
         self.maximum_bytes_billed = maximum_bytes_billed
+
 
     # ------------------------------------------------------------ client
     @property
@@ -302,6 +435,46 @@ class BigQueryProfiler:
         if self.location:
             kwargs["location"] = self.location
         return self.client.query(sql, **kwargs)
+
+    def _say(self, message: str) -> None:
+        if self.progress is not None:
+            self.progress(message)
+
+    def _run_logged(self, sql: str, what: str, section: str = "profiling") -> Tuple[Any, List[Any]]:
+        """Run a query and wait for it, reporting start (with the job ID,
+        to find it in the console) and finish (time, bytes processed, slot
+        time, bytes shuffled), and adding its usage to `section`."""
+        started = time.monotonic()
+        job = self._run(sql)
+        job_id = getattr(job, "job_id", None)
+        self._say(f"{what}: running" + (f" (job {job_id})" if job_id else "") + " ...")
+        try:
+            rows = list(job.result())
+        except KeyboardInterrupt:
+            # Stopping the program doesn't stop the job: BigQuery would
+            # keep running (and billing) it. Cancel it on the way out.
+            if hasattr(job, "cancel"):
+                self._say(f"{what}: interrupted, cancelling job {job_id or ''} ...")
+                try:
+                    job.cancel()
+                except Exception as exc:  # pragma: no cover - best effort
+                    self._say(f"Could not cancel job {job_id}: {exc}. Cancel it in the BigQuery console.")
+            raise
+        usage = _job_usage(job)
+        totals = self._usage.setdefault(section, {"queries": 0, "bytes_processed": 0, "slot_ms": None,
+                                                  "shuffle_bytes": None})
+        totals["queries"] += 1
+        for key in ("bytes_processed", "slot_ms", "shuffle_bytes"):
+            if usage[key] is not None:  # None = BigQuery didn't report it; don't show it as 0
+                totals[key] = (totals[key] or 0) + usage[key]
+        self._say(f"{what}: done in {time.monotonic() - started:.1f}s, " + _usage_text(usage))
+        return job, rows
+
+    def _can_dry_run(self) -> bool:
+        return self._job_config(dry_run=True) is not None
+
+    def _dry_run_bytes(self, sql: str) -> int:
+        return int(getattr(self._run(sql, dry_run=True), "total_bytes_processed", None) or 0)
 
     # ------------------------------------------------------------ schema
     def _resolve_source(self, table: Optional[str], query: Optional[str]) -> Tuple[str, List[Any], Optional[int], str]:
@@ -342,7 +515,8 @@ class BigQueryProfiler:
                 picked.append(by_lower[c.lower()])
         return picked
 
-    def _plan(self, table: Optional[str], query: Optional[str], columns: Optional[Sequence[str]]):
+    def _plan(self, table: Optional[str], query: Optional[str], columns: Optional[Sequence[str]],
+              references: Optional[Dict[str, str]] = None) -> _Plan:
         from_clause, schema, num_bytes, default_name = self._resolve_source(table, query)
         fields, skipped = [], []
         for name, field_type, mode in self._select_fields(schema, columns):
@@ -356,66 +530,235 @@ class BigQueryProfiler:
                 warnings.warn(_skip_message(name, field_type), UnsupportedColumnWarning, stacklevel=4)
             else:
                 fields.append((name, field_type, mode))
-        sqls = [
-            build_profile_sql(from_clause, fields[start:start + self.max_columns_per_query],
-                              top_n_values=self.top_n_values, exact_distinct=self.exact_distinct,
-                              alias_offset=start)
-            for start in range(0, len(fields), self.max_columns_per_query)
-        ] or [build_profile_sql(from_clause, [])]
-        return fields, sqls, num_bytes, default_name, skipped
+        # Correlations ride along in the first query rather than a query
+        # of their own: for a table of up to max_columns_per_query columns
+        # that query already reads every numeric column, so they cost no
+        # extra bytes. The corr-free version is kept so estimate() can
+        # price them separately.
+        st = self.settings
+        corr = correlation_expressions(self._correlation_fields(fields))
+        batches = range(0, len(fields), st.max_columns_per_query)
+
+        def batch_sql(start: int, extra: Sequence[Tuple[str, str]] = ()) -> str:
+            return build_profile_sql(from_clause, fields[start:start + st.max_columns_per_query],
+                                     top_n_values=st.top_n_values, exact_distinct=st.distinct_counts == "exact",
+                                     alias_offset=start, extra=extra)
+
+        sqls = [batch_sql(start, corr if start == 0 else ()) for start in batches] or [build_profile_sql(from_clause, [])]
+        corr_free_first = batch_sql(0) if corr else None
+        ref_checks = self._plan_references(from_clause, schema, fields, references)
+        return _Plan(fields, sqls, num_bytes, default_name, skipped, ref_checks, from_clause, corr_free_first)
+
+    def _plan_references(self, from_clause: str, schema: List[Any], fields: List[Tuple[str, str, str]],
+                         references: Optional[Dict[str, str]]) -> List[_RefCheck]:
+        """Declared checks; plus, when suggested references are set to
+        "check", the same-table pairs whose *names* fit, so estimate() and
+        build_sql() can show them before anything runs. That is an upper
+        bound: profile() re-picks suggestions once the profiling query has
+        shown which parents really look like keys."""
+        profiled = {name.lower(): (name, t, mode) for name, t, mode in fields}
+        whole = {f.name.lower(): (f.name, f.field_type, getattr(f, "mode", None) or "NULLABLE") for f in schema}
+        checks: List[_RefCheck] = []
+        for child, ref in (references or {}).items():
+            if child.lower() not in profiled:
+                raise ValueError(f"references: column {child!r} is not among the profiled columns.")
+            c_name, c_type, c_mode = profiled[child.lower()]
+            if "." in ref:
+                tbl_ref, _, p_col = ref.rpartition(".")
+                parent_from = _table_from_clause(tbl_ref)
+                parent_schema = {f.name.lower(): (f.name, f.field_type, getattr(f, "mode", None) or "NULLABLE")
+                                 for f in self.client.get_table(parent_from.strip("`")).schema}
+                where, same = parent_schema, False
+            else:
+                parent_from, p_col, where, same = from_clause, ref, whole, True
+            if p_col.lower() not in where:
+                raise ValueError(f"references: {child!r} -> {ref!r}, but column {p_col!r} was not found there.")
+            p_name, p_type, p_mode = where[p_col.lower()]
+            c_kind, p_kind = _column_kind(c_type, c_mode, c_name), _column_kind(p_type, p_mode, p_name)
+            if "complex" in (c_kind, p_kind):
+                raise ValueError(f"references: {c_name!r} -> {ref!r}: ARRAY/STRUCT/JSON columns can't be keys.")
+            label = p_name if same else f"{parent_from.strip('`')}.{p_name}"
+            as_text = c_kind != p_kind
+            sql = build_reference_sql(from_clause, c_name, parent_from, p_name, as_text=as_text,
+                                      sample=self.settings.ri_sample_orphans)
+            checks.append(_RefCheck(c_name, p_name, label, "declared", same, sql, as_text))
+
+        if self.settings.suggested_reference_mode(BIGQUERY) == "check":
+            declared = {c.child for c in checks}
+            keyish = [(n, t, m) for n, t, m in fields
+                      if _column_kind(t, m, n) == "string" or t.upper() in _INTEGER_TYPES]
+            suggested = [
+                self._suggested_check(from_clause, c_name, p_name)
+                for c_name, c_type, _ in keyish if c_name not in declared
+                for p_name, p_type, _ in keyish
+                if (c_type.upper() in _INTEGER_TYPES) == (p_type.upper() in _INTEGER_TYPES)
+                and name_suggests_reference(c_name, p_name)
+            ]
+            checks += suggested[: self.settings.max_reference_suggestions]
+        return checks
+
+    def _suggested_check(self, from_clause: str, child: str, parent: str) -> _RefCheck:
+        return _RefCheck(child, parent, parent, "suggested", True,
+                         build_reference_sql(from_clause, child, from_clause, parent,
+                                             sample=self.settings.ri_sample_orphans))
+
+    def _numeric_fields(self, fields: Sequence[Tuple[str, str, str]]) -> List[Tuple[int, str, str]]:
+        return [(i, name, t) for i, (name, t, mode) in enumerate(fields)
+                if _column_kind(t, mode, name) == "numeric"]
+
+    def _correlation_fields(self, fields: Sequence[Tuple[str, str, str]]) -> List[Tuple[int, str, str]]:
+        if not self.settings.correlations:
+            return []
+        numeric = self._numeric_fields(fields)[: self.settings.max_correlation_cols]
+        return numeric if len(numeric) >= 2 else []
+
+    def _correlations(self, fields, row: Dict[str, Any], column_profiles) -> Optional[Dict[str, Any]]:
+        """Shape the CORR() results like the pandas engine's matrix: NaN
+        (constant or too few rows) becomes 0, the diagonal is 1 unless the
+        column has no variance, values rounded to 3 places."""
+        numeric = self._correlation_fields(fields)
+        if not numeric:
+            return None
+        n = len(numeric)
+        matrix = [[0.0] * n for _ in range(n)]
+        for a in range(n):
+            std = (column_profiles[numeric[a][0]].get("numeric_stats") or {}).get("std")
+            matrix[a][a] = 1.0 if std else 0.0
+            for b in range(a + 1, n):
+                v = _safe_float(row.get(f"corr__{numeric[a][0]}__{numeric[b][0]}"))
+                matrix[a][b] = matrix[b][a] = round(max(-1.0, min(1.0, v)), 3) if v is not None else 0.0
+        return {
+            "columns": [name for _, name, _ in numeric],
+            "matrix": matrix,
+            "truncated": len(self._numeric_fields(fields)) > n,
+        }
 
     # ------------------------------------------------------------ public
     def build_sql(self, table: Optional[str] = None, query: Optional[str] = None,
-                  columns: Optional[Sequence[str]] = None) -> List[str]:
-        """The profiling SQL that `profile()` would run, without running
-        it. Only reads the schema (table metadata / a dry run)."""
-        return self._plan(table, query, columns)[1]
+                  columns: Optional[Sequence[str]] = None,
+                  references: Optional[Dict[str, str]] = None) -> List[str]:
+        """The SQL that `profile()` would run, without running it: the
+        profiling queries, then one referential-integrity query per
+        declared reference (and per name-matched suggestion when
+        suggested_references="check"). Only reads the schema."""
+        plan = self._plan(table, query, columns, references)
+        return plan.sqls + [c.sql for c in plan.ref_checks]
 
     def estimate(self, table: Optional[str] = None, query: Optional[str] = None,
                  columns: Optional[Sequence[str]] = None,
-                 price_per_tib_usd: float = ON_DEMAND_USD_PER_TIB) -> Dict[str, Any]:
-        """How much data `profile()` would scan, without running it.
+                 price_per_tib_usd: float = ON_DEMAND_USD_PER_TIB,
+                 references: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """How much data `profile()` would scan, without running it, in
+        total and per section (`sections`): profiling, correlations, and
+        each referential-integrity check.
 
         Uses BigQuery dry runs (free; the same number the console shows
-        as "This query will process ..."). The figure is an upper bound:
-        clustered tables and cached results can come in lower.
-        `estimated_cost_usd` is bytes x the on-demand price and ignores
-        the monthly free tier; it doesn't apply if you pay for capacity.
+        as "This query will process ..."). Correlations are priced as the
+        difference between dry runs of the first profiling query with and
+        without them. Figures are upper bounds: clustered tables and
+        cached results can come in lower. `estimated_cost_usd` is bytes x
+        the on-demand price and ignores the monthly free tier; it doesn't
+        apply if you pay for capacity.
         """
         # Checked first: without a dry-run config nothing below is safe to send.
-        if self._job_config(dry_run=True) is None:
+        if not self._can_dry_run():
             raise RuntimeError(
                 "Estimating needs a dry run, which requires the google-cloud-bigquery "
                 'package: pip install "datascope[bigquery]"'
             )
-        _, sqls, _, _, skipped = self._plan(table, query, columns)
-        total = 0
-        for sql in sqls:
-            job = self._run(sql, dry_run=True)
-            total += int(getattr(job, "total_bytes_processed", None) or 0)
+        plan = self._plan(table, query, columns, references)
+        cost = lambda b: round(b / 1024 ** 4 * price_per_tib_usd, 4)
+
+        def section(name: str, queries: int, nbytes: int, note: str = "") -> Dict[str, Any]:
+            return {"section": name, "queries": queries, "bytes_processed": nbytes,
+                    "bytes_processed_human": format_bytes(nbytes), "estimated_cost_usd": cost(nbytes), "note": note}
+
+        profiling = [self._dry_run_bytes(sql) for sql in plan.sqls]
+        sections = []
+        corr_bytes = max(0, profiling[0] - self._dry_run_bytes(plan.corr_free_first)) if plan.corr_free_first else 0
+        sections.append(section("profiling", len(plan.sqls), sum(profiling) - corr_bytes))
+        if plan.corr_free_first:
+            sections.append(section("correlations", 0, corr_bytes,
+                                    "Extra columns the first profiling query reads for CORR(); "
+                                    "0 when it already reads them all. --no-correlations removes it."))
+        for chk in plan.ref_checks:
+            note = ("Upper bound: runs only if profiling shows the parent is a key."
+                    if chk.source == "suggested" else "")
+            sections.append(section(f"reference {chk.child} -> {chk.label} ({chk.source})", 1,
+                                    self._dry_run_bytes(chk.sql), note))
+        if self.settings.distinct_counts == "keys":
+            sections.append(section("exact distinct counts", 0, 0,
+                                    "Not priced: runs after profiling, re-reading only the columns that "
+                                    "could be keys (no NULLs, nearly all unique), usually few or none."))
+        if self.settings.suggested_reference_mode(BIGQUERY) == "list":
+            sections.append(section("suggested references", 0, 0,
+                                    "Listed after profiling with their cost, not run "
+                                    "(--suggested-references check runs them)."))
+        sqls = plan.sqls + [c.sql for c in plan.ref_checks]
+        total = sum(s["bytes_processed"] for s in sections)
         return {
             "bytes_processed": total,
             "bytes_processed_human": format_bytes(total),
-            "estimated_cost_usd": round(total / 1024 ** 4 * price_per_tib_usd, 4),
+            "estimated_cost_usd": cost(total),
             "price_per_tib_usd": price_per_tib_usd,
             "queries": len(sqls),
+            "sections": sections,
+            # Dry runs measure bytes only. Under capacity (slot) pricing the
+            # cost is slot time, which only a real run reports.
+            "pricing_note": "Dollar figures assume on-demand pricing (billed per byte processed). If your "
+                            "organisation pays for slots (capacity pricing), you are billed for slot time "
+                            "instead, which a dry run can't predict: each run reports its slot time.",
             "sql": sqls,
-            "skipped_columns": skipped,
+            "skipped_columns": plan.skipped,
         }
 
     def profile(self, table: Optional[str] = None, query: Optional[str] = None,
-                columns: Optional[Sequence[str]] = None, source_name: Optional[str] = None) -> Dict[str, Any]:
-        fields, sqls, num_bytes, default_name, skipped = self._plan(table, query, columns)
+                columns: Optional[Sequence[str]] = None, source_name: Optional[str] = None,
+                references: Optional[Dict[str, str]] = None, sample_percent: Optional[float] = None,
+                sample_max_rows: int = DEFAULT_SAMPLE_MAX_ROWS) -> Dict[str, Any]:
+        """`references` declares referential-integrity checks as {child
+        column: parent}, where the parent is a column of the same source
+        ("customer_id") or of another table
+        ("project.dataset.customers.id").
 
+        `sample_percent` (with `table`) profiles a random sample instead:
+        `SELECT * ... TABLESAMPLE SYSTEM (p PERCENT) LIMIT sample_max_rows`.
+        `result["meta"]["sample"]` then also projects what a full run would
+        cost: bytes from a free dry run of the full-table queries, slot
+        time scaled up from the sample by rows (a rough guide). Each query
+        re-samples, so steps can see slightly different rows."""
+        st = self.settings
+        sampled_table, given_name = None, source_name
+        if sample_percent is not None:
+            if table is None:
+                raise ValueError("Sampling needs a table (sample_percent with table=...), not a query.")
+            sampled_table = table
+            query, table = sample_query(table, sample_percent, sample_max_rows), None
+            source_name = source_name or f"{_table_from_clause(sampled_table).strip('`')} ({sample_percent:g}% sample)"
+            self._say(f"Sampling {sample_percent:g}% of {sampled_table} (at most {sample_max_rows:,} rows).")
+        self._say(f"Reading the schema of {table or sampled_table or 'the query'} ...")
+        plan = self._plan(table, query, columns, references)
+        fields, sqls, skipped = plan.fields, plan.sqls, plan.skipped
+        self._say(f"Profiling {len(fields)} columns in {len(sqls)} quer{'y' if len(sqls) == 1 else 'ies'}"
+                  + (f", then {len(plan.ref_checks)} reference check(s)" if plan.ref_checks else "") + ".")
+
+        self._usage: Dict[str, Dict[str, int]] = {}
         row: Dict[str, Any] = {}
-        bytes_processed = 0
-        for sql in sqls:
-            job = self._run(sql)
-            rows = list(job.result())
+        for i, sql in enumerate(sqls, 1):
+            job, rows = self._run_logged(sql, f"Profiling query {i}/{len(sqls)}")
             row.update(dict(rows[0].items()) if rows else {})
-            bytes_processed += int(getattr(job, "total_bytes_processed", None) or 0)
 
         n_rows = int(row.get("n_rows") or 0)
+        self._exact_columns = set(name for name, _, _ in fields) if st.distinct_counts == "exact" else set()
+        recount_sql = None
+        if st.distinct_counts == "keys" and n_rows:
+            keys = self._possible_keys(fields, row, n_rows)
+            if keys:
+                recount_sql = build_distinct_sql(plan.from_clause, keys)
+                _, rows = self._run_logged(recount_sql, f"Exact distinct counts for {len(keys)} possible key "
+                                                        f"column{'' if len(keys) == 1 else 's'}")
+                row.update(dict(rows[0].items()) if rows else {})
+                self._exact_columns = {name for _, name, _, _ in keys}
         column_profiles = [
             self._column_profile(f"c{i}", name, field_type, mode, row, n_rows)
             for i, (name, field_type, mode) in enumerate(fields)
@@ -428,28 +771,73 @@ class BigQueryProfiler:
         for c in column_profiles:
             type_distribution[c["semantic_type"]] = type_distribution.get(c["semantic_type"], 0) + 1
 
-        pk_candidates = []
-        if n_rows and self.exact_distinct:
-            pk_candidates = [{"columns": [c["name"]], "type": "single"}
-                             for c in column_profiles if c["missing"] == 0 and c["unique"] == n_rows]
+        # Declared checks always run. Suggestions are re-picked from the
+        # profile (now that null and distinct counts are known) rather
+        # than the name-only plan.
+        ref_sqls_run: List[str] = []
+        referential_integrity: List[Dict[str, Any]] = []
+        by_name = {c["name"]: c for c in column_profiles}
+        for chk in plan.ref_checks:
+            if chk.source == "declared":
+                r = self._run_reference(chk, by_name[chk.child])
+                referential_integrity.append(r)
+                ref_sqls_run.append(chk.sql)
+        reference_suggestions: List[Dict[str, Any]] = []
+        mode = st.suggested_reference_mode(BIGQUERY)
+        if mode != "off":
+            pairs = suggestion_pairs(column_profiles, st, exclude_children=[c.child for c in plan.ref_checks
+                                                                             if c.source == "declared"])
+            can_price = mode == "list" and self._can_dry_run()
+            for i, (child, parent) in enumerate(pairs):
+                chk = self._suggested_check(plan.from_clause, child, parent)
+                if i >= st.max_reference_suggestions:
+                    reference_suggestions.append(suggestion_entry(child, parent, "over_limit"))
+                elif mode == "list":
+                    if can_price:
+                        self._say(f"Pricing suggested reference {child} -> {parent} (free dry run) ...")
+                    price = self._dry_run_bytes(chk.sql) if can_price else None
+                    reference_suggestions.append(suggestion_entry(child, parent, "listed", price))
+                else:
+                    r = self._run_reference(chk, by_name[child])
+                    ref_sqls_run.append(chk.sql)
+                    kept = keep_suggestion(r, st)
+                    if kept:
+                        referential_integrity.append(r)
+                    reference_suggestions.append(suggestion_entry(child, parent, "checked" if kept else "below_match"))
 
+        correlations = self._correlations(fields, row, column_profiles)
+        helper = DataProfiler(settings=st)
+        high_correlation_pairs = helper._high_correlation_pairs(correlations)
+
+        pk_candidates = []
+        if n_rows:
+            # Only exactly-counted columns can prove uniqueness.
+            pk_candidates = [{"columns": [c["name"]], "type": "single"} for c in column_profiles
+                             if c["name"] in self._exact_columns and c["missing"] == 0 and c["unique"] == n_rows]
+
+        meta: Dict[str, Any] = {
+            "source_name": str(source_name or plan.default_name),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "n_rows": n_rows,
+            "n_cols": n_cols,
+            "memory_mb": round(plan.num_bytes / (1024 * 1024), 3) if plan.num_bytes is not None else None,
+            # Not measured by this engine (see module docstring).
+            "duplicate_rows": None,
+            "duplicate_rows_pct": None,
+            "engine": BIGQUERY,
+            "sql": sqls + ([recount_sql] if recount_sql else []) + ref_sqls_run,
+            "bytes_processed": sum(u["bytes_processed"] for u in self._usage.values()),
+            "bytes_processed_by_section": {k: u["bytes_processed"] for k, u in self._usage.items()},
+            # BigQuery's own figures per section: queries, bytes processed,
+            # slot milliseconds (what capacity pricing bills), bytes shuffled.
+            "usage_by_section": self._usage,
+            "distinct_counts": st.distinct_counts,
+            "exact_distinct_columns": sorted(self._exact_columns),
+            # Columns left out because their type isn't supported.
+            "skipped_columns": skipped,
+        }
         result: Dict[str, Any] = {
-            "meta": {
-                "source_name": str(source_name or default_name),
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "n_rows": n_rows,
-                "n_cols": n_cols,
-                "memory_mb": round(num_bytes / (1024 * 1024), 3) if num_bytes is not None else None,
-                # Not measured by this engine (see module docstring).
-                "duplicate_rows": None,
-                "duplicate_rows_pct": None,
-                "engine": "bigquery",
-                "sql": sqls,
-                "bytes_processed": bytes_processed,
-                "exact_distinct": self.exact_distinct,
-                # Columns left out because their type isn't supported.
-                "skipped_columns": skipped,
-            },
+            "meta": meta,
             "overview": {
                 "type_distribution": type_distribution,
                 "total_missing_cells": int(total_missing),
@@ -457,22 +845,106 @@ class BigQueryProfiler:
                 "sensitive_columns_count": sum(1 for c in column_profiles if c["sensitive"]["is_sensitive"]),
             },
             "columns": column_profiles,
-            "correlations": None,
+            "correlations": correlations,
             "missing_correlation": None,
             "pk_candidates": pk_candidates,
-            "high_correlation_pairs": [],
+            "high_correlation_pairs": high_correlation_pairs,
             "duplicate_columns": [],
-            "functional_dependencies": [],
+            "column_dependencies": [],
+            "referential_integrity": referential_integrity,
+            "reference_suggestions": reference_suggestions,
         }
         alerts = [{"severity": "warning", "column": None, "message": _skip_message(sk["name"], sk["dtype"])}
                   for sk in skipped]
-        result["overview"]["alerts"] = alerts + DataProfiler()._build_alerts(column_profiles, 0, n_rows)
-        result["overview"]["quality_score"] = compute_quality_score(result)
+        result["overview"]["alerts"] = (alerts + helper._build_alerts(column_profiles, 0, n_rows, high_correlation_pairs)
+                                        + alerts_for(referential_integrity, st))
+
+        checks = bigquery_checks(st, {
+            "n_cols": n_cols, "n_skipped": len(skipped), "n_numeric": len(self._numeric_fields(fields)),
+            "n_exact": len(self._exact_columns),
+            "declared": len(references or {}), "suggestions": reference_suggestions,
+        })
+        if sampled_table is not None:
+            meta["sample"] = self._sample_projection(sampled_table, sample_percent, sample_max_rows, n_rows,
+                                                     columns, references)
+        finish_run_summary(meta, st, checks, {
+            "table": plan.default_name if table is not None else (
+                _table_from_clause(sampled_table).strip("`") if sampled_table else None),
+            "query": query if sampled_table is None else None,
+            "sample": (sample_percent, sample_max_rows) if sampled_table else None,
+            "columns": list(columns) if columns else None,
+            "source_name": given_name,
+            "references": [f"{child}={ref}" for child, ref in (references or {}).items()],
+            "connection": {"project": self.project, "location": self.location,
+                           "maximum_bytes_billed": self.maximum_bytes_billed},
+        }, BIGQUERY, _version())
         return result
 
     def to_html(self, profile_dict: Dict[str, Any], output_path: str) -> str:
         render_html(profile_dict, output_path)
         return output_path
+
+    def _sample_projection(self, table: str, percent: float, max_rows: int, sample_rows: int,
+                           columns: Optional[Sequence[str]], references: Optional[Dict[str, str]]) -> Dict[str, Any]:
+        """What the same profile of the whole table would use. Bytes: a
+        free dry run of the full-table queries (BigQuery's own figure, an
+        upper bound). Slot time: this run's slot time x table rows / sample
+        rows, a rough linear guide (large queries rarely scale exactly)."""
+        ref = _table_from_clause(table).strip("`")
+        table_rows = getattr(self.client.get_table(ref), "num_rows", None)
+        table_rows = int(table_rows) if table_rows is not None else None
+        out: Dict[str, Any] = {"table": ref, "percent": percent, "max_rows": max_rows,
+                               "sample_rows": sample_rows, "table_rows": table_rows,
+                               "full_bytes_processed": None, "full_slot_ms": None, "scale": None}
+        if self._can_dry_run():
+            self._say(f"Projecting a full run of {ref} (free dry run) ...")
+            plan = self._plan(ref, None, columns, references)
+            out["full_bytes_processed"] = sum(self._dry_run_bytes(q) for q in plan.sqls + [c.sql for c in plan.ref_checks])
+        # TABLESAMPLE SYSTEM picks whole storage blocks, so a small table
+        # (stored in few blocks) can come back whole, or empty.
+        if sample_rows == 0:
+            out["warning"] = ("The sample came back empty: TABLESAMPLE picks whole storage blocks, and a small "
+                              "table may have very few. Raise --sample-percent.")
+        elif table_rows and sample_rows >= table_rows:
+            out["warning"] = ("The sample covered the whole table: TABLESAMPLE picks whole storage blocks, and "
+                              "this table is small enough to be stored in very few. The figures are the full run's.")
+        slot_ms = [u["slot_ms"] for u in self._usage.values() if u.get("slot_ms") is not None]
+        if table_rows and sample_rows:
+            out["scale"] = table_rows / sample_rows
+            if slot_ms:
+                out["full_slot_ms"] = int(sum(slot_ms) * out["scale"])
+        return out
+
+    def _possible_keys(self, fields: Sequence[Tuple[str, str, str]], row: Dict[str, Any],
+                       n_rows: int) -> List[Tuple[int, str, str, str]]:
+        """Columns whose approximate counts say they could be a key: no
+        NULLs, and a unique share within KEY_RECOUNT_MARGIN_PCT of the bar
+        a primary key (100%) or a reference target (ri_parent_min_unique_pct)
+        must clear."""
+        bar = min(100.0, self.settings.ri_parent_min_unique_pct) - KEY_RECOUNT_MARGIN_PCT
+        keys = []
+        for i, (name, field_type, mode) in enumerate(fields):
+            missing = int(row.get(f"c{i}__missing") or 0)
+            approx = int(row.get(f"c{i}__distinct") or 0)
+            if missing == 0 and approx and 100 * approx / n_rows >= bar:
+                keys.append((i, name, field_type, mode))
+        return keys
+
+    def _run_reference(self, chk: _RefCheck, child: Dict[str, Any]) -> Dict[str, Any]:
+        job, raw = self._run_logged(chk.sql, f"Reference check {chk.child} -> {chk.label}", section="references")
+        rows = [dict(r.items()) for r in raw]
+        rows = [r for r in rows if r.get("value") is not None]
+        result = build_result(
+            chk.child, chk.label, chk.source, chk.same_table,
+            checked=child["count"] - child["missing"],
+            orphans=int(rows[0]["orphans"]) if rows else 0,
+            orphan_values=int(rows[0]["orphan_values"]) if rows else 0,
+            samples=[(x["value"], x["n"]) for x in rows],
+            sensitive=child["sensitive"]["is_sensitive"],
+            compared_as="text" if chk.as_text else "value",
+            sample_n=self.settings.ri_sample_orphans,
+        )
+        return result
 
     # -------------------------------------------------------- per column
     def _column_profile(self, alias: str, name: str, field_type: str, mode: str,
@@ -494,7 +966,7 @@ class BigQueryProfiler:
                 continue
             top_values.append({"value": str(value)[:200], "count": int(count),
                                "pct": round(100 * count / n_rows, 2) if n_rows else 0.0})
-        top_values = top_values[: self.top_n_values]
+        top_values = top_values[: self.settings.top_n_values]
         if top_values and top_values[0]["count"] <= 1 and n_rows > 1:
             # Every value occurs once: a "top 10" would just be ten
             # arbitrary raw values, so show none.
@@ -509,7 +981,7 @@ class BigQueryProfiler:
         notes = list(notes)
         if repeated:
             notes.append("Repeated (ARRAY) column — empty arrays are counted as missing.")
-        if not self.exact_distinct:
+        if name not in getattr(self, "_exact_columns", ()):
             notes.append("Distinct count is approximate (APPROX_COUNT_DISTINCT).")
 
         profile: Dict[str, Any] = {
@@ -632,21 +1104,29 @@ def profile_bigquery(
     output_html: Optional[str] = "data_profile_report.html",
     source_name: Optional[str] = None,
     open_browser: bool = False,
+    references: Optional[Dict[str, str]] = None,
+    sample_percent: Optional[float] = None,
+    sample_max_rows: int = DEFAULT_SAMPLE_MAX_ROWS,
     **kwargs,
 ) -> Dict[str, Any]:
     """One-liner: profile a BigQuery `table` ("project.dataset.table") or
     the result of a SQL `query`, computing everything inside BigQuery.
 
     `columns` restricts profiling to a subset (default: every column).
+    `references` declares referential-integrity checks, e.g.
+    {"customer_id": "my-project.sales.customers.id"} or, within the same
+    table, {"manager_id": "employee_id"}.
     Writes the HTML report to `output_html` (pass None to skip it) and
     returns the profile dict — same shape as `datascope.profile()`. The
     SQL that ran is in `result["meta"]["sql"]`.
 
     Extra keyword arguments go to `BigQueryProfiler` (client, project,
-    location, exact_distinct, top_n_values, maximum_bytes_billed, ...).
+    location, distinct_counts, top_n_values, maximum_bytes_billed, ...).
     """
     profiler = BigQueryProfiler(**kwargs)
-    result = profiler.profile(table=table, query=query, columns=columns, source_name=source_name)
+    result = profiler.profile(table=table, query=query, columns=columns, source_name=source_name,
+                              references=references, sample_percent=sample_percent,
+                              sample_max_rows=sample_max_rows)
     if output_html:
         profiler.to_html(result, output_html)
         if open_browser:
@@ -661,10 +1141,11 @@ def estimate_bigquery_cost(
     query: Optional[str] = None,
     columns: Optional[Sequence[str]] = None,
     price_per_tib_usd: float = ON_DEMAND_USD_PER_TIB,
+    references: Optional[Dict[str, str]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """Dry-run the profiling SQL for `table` / `query` and return how many
     bytes it would scan and the approximate on-demand cost. Runs nothing
     and costs nothing. Same arguments as `profile_bigquery`."""
     return BigQueryProfiler(**kwargs).estimate(table=table, query=query, columns=columns,
-                                               price_per_tib_usd=price_per_tib_usd)
+                                               price_per_tib_usd=price_per_tib_usd, references=references)

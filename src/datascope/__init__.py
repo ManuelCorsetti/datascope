@@ -26,6 +26,7 @@ or pushed down to BigQuery (only aggregates leave the warehouse):
 
 from .bigquery import BigQueryProfiler, estimate_bigquery_cost, profile_bigquery
 from .core import DataProfiler, profile
+from .settings import Settings
 
-__all__ = ["DataProfiler", "profile", "BigQueryProfiler", "profile_bigquery", "estimate_bigquery_cost"]
+__all__ = ["DataProfiler", "profile", "BigQueryProfiler", "profile_bigquery", "estimate_bigquery_cost", "Settings"]
 __version__ = "1.1.0"

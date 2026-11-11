@@ -105,3 +105,82 @@ class TestConfidenceCombination:
         s = pd.Series(["a@example.com"] * 10)
         result = detect_sensitive_data(s, "email_address", skip_content=False)
         assert result["confidence"] <= 0.99
+
+
+class TestPlainLanguage:
+    def test_labels_and_reasons_explain_a_flag(self):
+        s = detect_sensitive_data(pd.Series(["ann@x.com"] * 9 + ["n/a"]), "contact_email")
+        assert (s["category_label"], s["type_label"]) == ("Personal data", "email address")
+        assert s["reasons"] == ["Its name suggests it holds an email address.",
+                                "90% of 10 sampled values have the format of an email address."]
+
+    def test_reasons_mention_the_checksum_and_never_quote_values(self):
+        s = detect_sensitive_data(pd.Series(["4111111111111111"] * 10), "ref")
+        assert s["category_label"] == "Payment data"
+        assert s["reasons"] == ["100% of 10 sampled values have the format of a credit card number "
+                                "and pass its checksum."]
+        assert not any("4111" in r for r in s["reasons"])
+
+    def test_not_sensitive_has_empty_explanations(self):
+        s = detect_sensitive_data(pd.Series(["a", "b"]), "colour")
+        assert s["reasons"] == [] and s["category_label"] is None
+
+    def test_ip_address_is_not_mistaken_for_a_postal_address(self):
+        s = detect_sensitive_data(pd.Series([], dtype=object), "ip_address", skip_content=True)
+        assert s["type"] == "ip_address" and s["type_label"] == "IP address"
+        assert detect_sensitive_data(pd.Series([], dtype=object), "shipping_address", skip_content=True)["type"] == "address"
+
+
+def test_alert_and_rule_use_plain_language():
+    from datascope import DataProfiler
+    df = pd.DataFrame({"email": [f"user{i}@example.com" for i in range(50)]})
+    result = DataProfiler().profile(df)
+    [alert] = [a for a in result["overview"]["alerts"] if a["severity"] == "sensitive"]
+    assert alert["message"] == "Looks like personal data (email address): review who can access it."
+    rule = next(r for r in result["columns"][0]["quality_rules"] if r["type"] == "access_control")
+    assert rule["description"].startswith("Looks like personal data (email address):")
+
+
+class TestPartialAndEmbedded:
+    """Even a column that is only partly personal data gets flagged."""
+
+    def test_a_few_percent_of_emails_is_enough(self):
+        values = ["unknown"] * 97 + ["a@x.com", "b@y.org", "c@z.net"]
+        s = detect_sensitive_data(pd.Series(values), "c1")
+        assert s["is_sensitive"] and s["type"] == "email"
+        assert s["reasons"] == ["3% of 100 sampled values have the format of an email address."]
+
+    def test_threshold_is_respected(self):
+        values = ["unknown"] * 97 + ["a@x.com", "b@y.org", "c@z.net"]
+        assert not detect_sensitive_data(pd.Series(values), "c1", min_match_rate=0.05)["is_sensitive"]
+
+    def test_emails_and_dashed_ids_inside_free_text(self):
+        notes = ["all good"] * 8 + ["please email ann.lee@corp.co.uk tomorrow", "SSN on file: 123-45-6789."]
+        s = detect_sensitive_data(pd.Series(notes), "c1")
+        assert s["is_sensitive"] and s["type"] in ("email", "national_id")
+        assert "contain" in s["reasons"][0]
+        # numbers in prose that aren't dashed IDs or emails don't count
+        prose = ["order 123456789 shipped", "call back at 3pm", "version 2.1.0"] * 10
+        assert not detect_sensitive_data(pd.Series(prose), "c1")["is_sensitive"]
+
+    def test_dashed_ssn_is_labelled_national_id_not_phone(self):
+        values = ["none"] * 99 + ["123-45-6789"]
+        assert detect_sensitive_data(pd.Series(values), "c1")["type"] == "national_id"
+
+    def test_iban_shaped_codes_need_a_valid_checksum(self):
+        codes = [f"AB{10 + i % 80}CDEFGH{i:08d}" for i in range(100)]  # IBAN-shaped, checksums fail
+        assert not detect_sensitive_data(pd.Series(codes), "c1")["is_sensitive"]
+        ibans = ["GB82WEST12345698765432", "DE89370400440532013000", "FR1420041010050500013M02606"] * 10
+        s = detect_sensitive_data(pd.Series(ibans), "c1")
+        assert s["type"] == "bank_account" and s["reasons"][0].endswith("and pass its checksum.")
+
+
+def test_every_flagged_column_alerts_by_default_and_the_bar_is_a_setting():
+    from datascope import DataProfiler
+    df = pd.DataFrame({"full_name": [f"Person {i}" for i in range(40)],                       # name only: 0.55
+                       "c1": ["unknown"] * 38 + ["a@x.com", "b@y.org"]})                       # 5% emails
+    alerted = lambda **kw: sorted(a["column"] for a in DataProfiler(**kw).profile(df)["overview"]["alerts"]
+                                  if a["severity"] == "sensitive")
+    assert alerted() == ["c1", "full_name"]
+    assert alerted(sensitive_alert_min_confidence=0.5) == ["full_name"]
+    assert alerted(sensitive_min_match_pct=10) == ["full_name"]

@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from datascope import BigQueryProfiler, DataProfiler, estimate_bigquery_cost, profile_bigquery
-from datascope.bigquery import UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql, format_bytes, quote_identifier
+from datascope.bigquery import (UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql,
+                                build_reference_sql, correlation_expressions, format_bytes, quote_identifier)
 from datascope.cli import main
 from datascope.html_report import _sanitize
 from datascope.semantic import infer_semantic_type_from_summary
@@ -51,6 +52,23 @@ class TestSqlGeneration:
         assert "COUNT(DISTINCT TO_JSON_STRING(`tags`))" in sql
         assert "COUNT(DISTINCT TO_JSON_STRING(`payload`))" in sql
         assert "APPROX_TOP_COUNT" not in sql
+
+    def test_correlation_expressions_cover_each_pair_once(self):
+        exprs = correlation_expressions([(0, "a", "INT64"), (2, "b", "FLOAT64"), (5, "c", "NUMERIC")])
+        assert [alias for alias, _ in exprs] == ["corr__0__2", "corr__0__5", "corr__2__5"]
+        # same NaN/inf guard as the per-column stats
+        assert exprs[0][1] == "CORR(CAST(`a` AS FLOAT64), IF(IS_NAN(`b`) OR IS_INF(`b`), NULL, `b`))"
+        sql = build_profile_sql("`p.d.t`", [("a", "INT64", "NULLABLE")], extra=exprs)
+        assert sql.count("FROM ") == 1 and ",\nFROM" not in sql
+        assert sql.rstrip().split("\n")[-2].endswith("AS corr__2__5")
+
+    def test_reference_sql_is_one_anti_join(self):
+        sql = build_reference_sql("`p.d.orders`", "customer_id", "`p.d.customers`", "id")
+        assert "FROM (SELECT `customer_id` AS v FROM `p.d.orders` AS _datascope_src WHERE `customer_id` IS NOT NULL) AS child" in sql
+        assert "LEFT JOIN (SELECT DISTINCT `id` AS v FROM `p.d.customers` AS _datascope_ref WHERE `id` IS NOT NULL) AS parent" in sql
+        assert "WHERE parent.v IS NULL" in sql and sql.endswith("LIMIT 5")
+        text = build_reference_sql("`p.d.orders`", "customer_id", "`p.d.customers`", "id", as_text=True)
+        assert "CAST(`customer_id` AS STRING) AS v" in text and "CAST(`id` AS STRING) AS v" in text
 
     def test_unknown_type_raises_instead_of_guessing(self):
         with pytest.raises(ValueError, match=r"'VECTOR'.*'emb'"):
@@ -147,13 +165,18 @@ class TestProfileShape:
     def test_table_profile_maps_aggregates_into_profile_dict(self, canned):
         result = BigQueryProfiler(client=canned).profile(table="proj.sales.orders")
         assert canned.tables == ["proj.sales.orders"]
-        assert len(canned.queries) == 1
+        # profiling (approximate distinct counts), then an exact recount of the
+        # one column that could be a key: order_id (no NULLs, 1000/1000 distinct)
+        assert len(canned.queries) == 2
+        assert "APPROX_COUNT_DISTINCT(`order_id`)" in canned.queries[0]
+        assert canned.queries[1] == "SELECT\n  COUNT(DISTINCT `order_id`) AS c0__distinct\nFROM `proj.sales.orders` AS _datascope_src"
         meta = result["meta"]
+        assert meta["exact_distinct_columns"] == ["order_id"]
         assert (meta["n_rows"], meta["n_cols"], meta["engine"]) == (1000, 3, "bigquery")
         assert meta["source_name"] == "proj.sales.orders"
         assert meta["memory_mb"] == 3.0
         assert meta["sql"] == canned.queries
-        assert meta["bytes_processed"] == 2048
+        assert meta["bytes_processed"] == 2 * 2048  # the canned client bills 2 KB per query
         assert meta["duplicate_rows"] is None
 
         order_id, email, amount = result["columns"]
@@ -181,7 +204,6 @@ class TestProfileShape:
         assert any(r["type"] == "non_negative_check" for r in amount["quality_rules"])
         assert any(a["column"] == "amount" for a in result["overview"]["alerts"])
         assert result["overview"]["total_missing_cells"] == 600
-        assert 0 < result["overview"]["quality_score"] <= 100
         json.dumps(_sanitize(result))  # must not raise
 
     def test_column_subset_is_case_insensitive_and_validated(self, canned):
@@ -192,9 +214,63 @@ class TestProfileShape:
         with pytest.raises(ValueError, match="nope"):
             profiler.profile(table="proj.sales.orders", columns=["nope"])
 
+    def test_correlations_ride_in_the_first_query_only(self, canned):
+        canned.row["corr__0__2"] = 0.912345
+        result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
+        first, second, recount = result["meta"]["sql"]
+        assert recount.startswith("SELECT\n  COUNT(DISTINCT `order_id`)")
+        assert "CORR(CAST(`order_id` AS FLOAT64), CAST(`amount` AS FLOAT64)) AS corr__0__2" in first
+        assert "CORR(" not in second
+        assert result["correlations"] == {"columns": ["order_id", "amount"],
+                                          "matrix": [[1.0, 0.912], [0.912, 1.0]], "truncated": False}
+        assert result["high_correlation_pairs"] == [{"col1": "order_id", "col2": "amount", "correlation": 0.912}]
+        assert any("highly correlated" in a["message"] for a in result["overview"]["alerts"])
+
+    def test_correlations_can_be_turned_off(self, canned):
+        assert "CORR(" not in BigQueryProfiler(client=canned, correlations=False).build_sql("proj.sales.orders")[0]
+        result = BigQueryProfiler(client=canned, correlations=False).profile(table="proj.sales.orders")
+        assert result["correlations"] is None and result["high_correlation_pairs"] == []
+        corr = next(c for c in result["meta"]["checks"] if c["id"] == "correlations")
+        assert corr["status"] == "skipped" and corr["flags"] == ["--correlations"]
+        with pytest.raises(ValueError, match="max_correlation_cols"):
+            BigQueryProfiler(client=canned, max_correlation_cols=1)  # can't correlate one column
+
+    def test_declared_references_are_planned_and_validated(self, canned):
+        canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
+        sqls = BigQueryProfiler(client=canned, max_reference_suggestions=0).build_sql(
+            "proj.sales.orders", references={"ORDER_ID": "proj.sales.orders.order_id", "amount": "order_id"})
+        assert len(sqls) == 3
+        assert "FROM `proj.sales.orders` AS _datascope_ref" in sqls[1]
+        assert "CAST(`amount` AS STRING)" not in sqls[2]  # NUMERIC vs INT64: both numeric, compared natively
+        with pytest.raises(ValueError, match="not among the profiled columns"):
+            BigQueryProfiler(client=canned).build_sql("proj.sales.orders", references={"nope": "order_id"})
+        with pytest.raises(ValueError, match="'zzz' was not found"):
+            BigQueryProfiler(client=canned).build_sql("proj.sales.orders", references={"amount": "zzz"})
+        # the email column vs an INT64 key: compared as text rather than failing in BigQuery
+        sql = BigQueryProfiler(client=canned).build_sql("proj.sales.orders",
+                                                        references={"customer_email": "order_id"})[1]
+        assert "CAST(`customer_email` AS STRING)" in sql
+
+    def test_suggestions_are_listed_by_default_and_planned_only_when_checked(self, canned, dry_run_config):
+        canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
+        # default ("auto" = list on BigQuery): nothing planned beyond profiling
+        assert len(BigQueryProfiler(client=canned).build_sql("proj.sales.orders")) == 1
+        est = BigQueryProfiler(client=canned).estimate(table="proj.sales.orders")
+        assert est["sections"][-1]["section"] == "suggested references" and est["sections"][-1]["bytes_processed"] == 0
+        # "check": name-matched pairs are planned (an upper bound) ...
+        profiler = BigQueryProfiler(client=canned, suggested_references="check")
+        planned = profiler.build_sql("proj.sales.orders")
+        assert len(planned) == 2 and "`parent_order_id` AS v" in planned[1]
+        by = {s["section"]: s for s in profiler.estimate(table="proj.sales.orders")["sections"]}
+        assert by["reference parent_order_id -> order_id (suggested)"]["note"].startswith("Upper bound")
+        # ... but canned row has no stats for parent_order_id -> not a plausible child, nothing extra runs
+        result = profiler.profile(table="proj.sales.orders")
+        assert not any("_datascope_ref" in q for q in result["meta"]["sql"]) and result["referential_integrity"] == []
+        assert BigQueryProfiler(client=canned, suggested_references="off").build_sql("proj.sales.orders") == planned[:1]
+
     def test_wide_tables_are_split_into_batches(self, canned):
         result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
-        assert len(result["meta"]["sql"]) == 2
+        assert len(result["meta"]["sql"]) == 3  # two batches, then the exact recount of order_id
         assert [c["name"] for c in result["columns"]] == ["order_id", "customer_email", "amount"]
         assert result["columns"][2]["numeric_stats"]["max"] == 99.0
 
@@ -253,7 +329,7 @@ class TestProfileShape:
 
     def test_approx_distinct_never_exceeds_row_count_and_skips_pk(self, canned):
         canned.row["c0__distinct"] = 1012  # HLL overshoot
-        result = BigQueryProfiler(client=canned, exact_distinct=False).profile(table="proj.sales.orders")
+        result = BigQueryProfiler(client=canned, distinct_counts="approx").profile(table="proj.sales.orders")
         assert result["columns"][0]["unique"] == 1000
         assert result["pk_candidates"] == []
 
@@ -269,11 +345,36 @@ class TestEstimate:
     def test_estimate_dry_runs_every_batch_and_runs_nothing(self, canned, dry_run_config):
         est = BigQueryProfiler(client=canned, max_columns_per_query=2).estimate(table="proj.sales.orders")
         assert canned.queries == []
-        assert canned.dry_runs == est["sql"] and est["queries"] == 2
+        # every query dry-run, plus the first one without CORR() to price correlations
+        assert set(est["sql"]) < set(canned.dry_runs) and len(canned.dry_runs) == 3 and est["queries"] == 2
         assert est["bytes_processed"] == 1024 ** 4
         assert est["bytes_processed_human"] == "1.00 TB"
         assert est["estimated_cost_usd"] == 6.25
         assert estimate_bigquery_cost("proj.sales.orders", client=canned, price_per_tib_usd=5)["estimated_cost_usd"] == 2.5
+
+    def test_estimate_is_split_by_section(self, canned, dry_run_config):
+        # A client whose dry runs bill 1 GiB per distinct column referenced.
+        def dry_bytes(sql):
+            import re
+            return len(set(re.findall(r"`(\w+)`", sql)) - {"proj.sales.orders"}) * 1024 ** 3
+        orig = canned.query
+        def query(sql, job_config=None, **kw):
+            job = orig(sql, job_config=job_config, **kw)
+            if getattr(job_config, "dry_run", False):
+                job.total_bytes_processed = dry_bytes(sql)
+            return job
+        canned.query = query
+        canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
+        est = BigQueryProfiler(client=canned, max_columns_per_query=2, suggested_references="check").estimate(
+            table="proj.sales.orders", references={"amount": "order_id"})
+        by = {s["section"]: s for s in est["sections"]}
+        # batch 1 reads order_id + customer_email, batch 2 amount + parent_order_id;
+        # CORR() makes batch 1 also read amount and parent_order_id: 2 GiB extra
+        assert by["profiling"]["bytes_processed"] == 4 * 1024 ** 3 and by["profiling"]["queries"] == 2
+        assert by["correlations"]["bytes_processed"] == 2 * 1024 ** 3
+        assert by["reference amount -> order_id (declared)"]["bytes_processed"] == 2 * 1024 ** 3
+        assert by["reference parent_order_id -> order_id (suggested)"]["note"].startswith("Upper bound")
+        assert est["bytes_processed"] == sum(s["bytes_processed"] for s in est["sections"])
 
     def test_estimate_refuses_to_run_for_real_when_dry_run_unavailable(self, canned, monkeypatch):
         monkeypatch.setattr(BigQueryProfiler, "_job_config", lambda self, dry_run=False: None)
@@ -366,7 +467,10 @@ class TestExecutedAgainstRealData:
                 continue
             exp = expected[col["name"]]
             assert col["missing"] == exp["missing"], col["name"]
-            assert col["unique"] == exp["unique"], col["name"]
+            if col["name"] in result["meta"]["exact_distinct_columns"]:
+                assert col["unique"] == exp["unique"], col["name"]
+            else:  # approximate (DuckDB's estimator here, HyperLogLog++ on BigQuery)
+                assert col["unique"] == pytest.approx(exp["unique"], rel=0.05), col["name"]
             assert col["semantic_type"] == exp["semantic_type"], col["name"]
             for key in ("boolean_stats", "string_stats"):
                 assert col[key] == exp[key], (col["name"], key)
@@ -396,6 +500,79 @@ class TestExecutedAgainstRealData:
         assert {"columns": ["customer_id"], "type": "single"} in result["pk_candidates"]
         assert by_name["email"]["sensitive"]["is_sensitive"]
         assert by_name["email"]["top_values"] == []
+
+    def test_correlations_agree_with_pandas_engine(self, warehouse):
+        client, _ = warehouse
+        rng = np.random.default_rng(3)
+        x = rng.normal(0, 1, 300)
+        df = pd.DataFrame({
+            "x": x,
+            "y": 2 * x + rng.normal(0, 0.3, 300),   # strong positive
+            "neg": (-x * 10).round().astype("int64"),  # strong negative, integer column
+            "noise": rng.normal(0, 1, 300),
+            "flat": np.full(300, 4.0),              # no variance -> 0, like pandas
+            "label": rng.choice(["a", "b"], 300),    # not numeric: left out
+        })
+        df.loc[rng.choice(300, 30, replace=False), "y"] = np.nan  # pairwise-complete handling
+        client.load("corr_demo", df)
+
+        got = profile_bigquery("demo.shop.corr_demo", client=client, output_html=None)
+        want = DataProfiler().profile(df)
+        assert got["correlations"]["columns"] == want["correlations"]["columns"] == ["x", "y", "neg", "noise", "flat"]
+        np.testing.assert_allclose(got["correlations"]["matrix"], want["correlations"]["matrix"], atol=0.002)
+        assert {(p["col1"], p["col2"]) for p in got["high_correlation_pairs"]} == \
+               {(p["col1"], p["col2"]) for p in want["high_correlation_pairs"]}
+
+    def test_referential_integrity_agrees_with_pandas_engine(self, warehouse):
+        client, _ = warehouse
+        rng = np.random.default_rng(5)
+        n = 300
+        customers = pd.DataFrame({"id": np.arange(1, 201)})
+        orders = pd.DataFrame({
+            "order_id": np.arange(1, n + 1),
+            "customer_id": rng.integers(1, 215, n),
+            "parent_order_id": pd.array(np.where(rng.random(n) < 0.5, rng.integers(1, n + 1, n), None), dtype="Int64"),
+            "quantity": rng.integers(1, 6, n),
+            "sku": rng.choice(["A1", "B2", "C3"], n),
+        })
+        orders.loc[[5, 6], "parent_order_id"] = 5000
+        client.load("ri_customers", customers)
+        client.load("ri_orders", orders)
+
+        got = profile_bigquery("demo.shop.ri_orders", client=client, output_html=None, suggested_references="check",
+                               references={"customer_id": "demo.shop.ri_customers.id", "sku": "order_id"})
+        want = DataProfiler().profile(orders, references={
+            "customer_id": ("demo.shop.ri_customers.id", customers["id"]), "sku": "order_id"})
+        key = lambda r: (r["column"], r["references"], r["source"], r["same_table"], r["checked"],
+                         r["orphans"], r["orphan_values"], r["compared_as"] == "text")
+        assert sorted(map(key, got["referential_integrity"])) == sorted(map(key, want["referential_integrity"]))
+        by_col = {r["column"]: r for r in got["referential_integrity"]}
+        assert by_col["parent_order_id"]["source"] == "suggested"
+        assert by_col["parent_order_id"]["sample_orphans"] == [{"value": "5000", "count": 2}]
+        assert by_col["sku"]["orphans"] == n  # text vs integer ids: compared as text, nothing matches
+        assert {r["column"]: r["sample_orphans"] for r in got["referential_integrity"]} == \
+               {r["column"]: r["sample_orphans"] for r in want["referential_integrity"]}
+        assert sum("_datascope_ref" in q for q in got["meta"]["sql"]) == 3
+
+    def test_suggestions_are_listed_with_their_cost_by_default(self, warehouse, dry_run_config):
+        client, _ = warehouse
+        n = 120
+        df = pd.DataFrame({"order_id": np.arange(1, n + 1),
+                           "parent_order_id": pd.array(np.r_[np.arange(1, 31).repeat(2), [None] * 60], dtype="Int64")})
+        client.load("ri_listed", df)
+        before = len(client.queries)
+        result = profile_bigquery("demo.shop.ri_listed", client=client, output_html=None)
+        new = client.queries[before:]
+        # profiling, then the exact recount of the possible key; no reference query ran
+        assert len(new) == 2 and new[1].startswith("SELECT\n  COUNT(DISTINCT `order_id`)")
+        assert result["referential_integrity"] == []
+        [sg] = result["reference_suggestions"]
+        assert (sg["column"], sg["references"], sg["status"]) == ("parent_order_id", "order_id", "listed")
+        assert sg["estimated_bytes"] == 5 * 1024 * 1024  # the stand-in's dry-run figure
+        check = next(c for c in result["meta"]["checks"] if c["id"] == "ri_suggested")
+        assert check["status"] == "listed" and "5.00 MB" in check["detail"]
+        assert result["meta"]["extend_command"]["text"] == \
+            "datascope --bq-table demo.shop.ri_listed --suggested-references check"
 
     def test_query_profile_covers_every_result_column(self, warehouse):
         client, df = warehouse
@@ -428,7 +605,7 @@ class TestExecutedAgainstRealData:
     def test_approximate_distinct_is_close(self, warehouse):
         client, df = warehouse
         result = profile_bigquery("demo.shop.customers", columns=["customer_id"], client=client,
-                                  output_html=None, exact_distinct=False)
+                                  output_html=None, distinct_counts="approx")
         assert result["columns"][0]["unique"] == pytest.approx(len(df), rel=0.05)
 
     def test_empty_table(self, warehouse, tmp_path):
@@ -436,7 +613,6 @@ class TestExecutedAgainstRealData:
         result = profile_bigquery("demo.shop.empty", client=client, output_html=str(tmp_path / "empty.html"))
         assert result["meta"]["n_rows"] == 0
         assert {c["semantic_type"] for c in result["columns"]} == {"empty"}
-        assert result["overview"]["quality_score"] is None
 
     def test_unsupported_column_is_skipped_and_the_rest_profiled(self, warehouse):
         client, _ = warehouse
@@ -462,7 +638,7 @@ class TestExecutedAgainstRealData:
         capsys.readouterr()
         main()
         printed = capsys.readouterr().out
-        assert "COUNT(DISTINCT `country`) AS c0__distinct" in printed
+        assert "APPROX_COUNT_DISTINCT(`country`) AS c0__distinct" in printed
         assert "Report written" not in printed
 
 
@@ -473,3 +649,152 @@ def test_cli_requires_exactly_one_source(monkeypatch):
     monkeypatch.setattr("sys.argv", ["datascope"])
     with pytest.raises(SystemExit):
         main()
+
+
+class TestProgressAndCancel:
+    def test_progress_reports_each_query_with_job_id_time_and_bytes(self, canned):
+        messages = []
+        BigQueryProfiler(client=canned, progress=messages.append).profile(table="proj.sales.orders")
+        assert messages[0] == "Reading the schema of proj.sales.orders ..."
+        assert messages[1] == "Profiling 3 columns in 1 query."
+        assert messages[2] == "Profiling query 1/1: running ..."
+        assert messages[3].startswith("Profiling query 1/1: done in ") and messages[3].endswith("2.00 KB processed")
+
+    def test_interrupt_cancels_the_running_job(self, canned):
+        cancelled = []
+
+        class SlowJob:
+            job_id = "job_123"
+            total_bytes_processed = 0
+
+            def result(self):
+                raise KeyboardInterrupt
+
+            def cancel(self):
+                cancelled.append(self.job_id)
+
+        canned.query = lambda sql, **kw: SlowJob()
+        messages = []
+        with pytest.raises(KeyboardInterrupt):
+            BigQueryProfiler(client=canned, progress=messages.append).profile(table="proj.sales.orders")
+        assert cancelled == ["job_123"]
+        assert "cancelling job job_123" in messages[-1]
+
+    def test_cli_exits_cleanly_on_interrupt(self, monkeypatch, capsys):
+        def boom(argv):
+            raise KeyboardInterrupt
+        monkeypatch.setattr("datascope.cli._main", boom)
+        with pytest.raises(SystemExit) as exc:
+            main([])
+        assert exc.value.code == 130 and "Interrupted." in capsys.readouterr().err
+
+
+class TestDistinctCountModes:
+    def test_keys_mode_recounts_only_possible_keys(self, warehouse):
+        client, df = warehouse
+        result = profile_bigquery("demo.shop.customers", client=client, output_html=None)
+        # customer_id: no NULLs, all unique -> recounted exactly and found as a key;
+        # email: also all unique -> recounted. Nothing else is close to unique.
+        assert result["meta"]["exact_distinct_columns"] == ["customer_id", "email"]
+        assert {"columns": ["customer_id"], "type": "single"} in result["pk_candidates"]
+        by = {c["name"]: c for c in result["columns"]}
+        assert by["customer_id"]["unique"] == len(df)
+        assert "approximate" not in " ".join(by["customer_id"]["semantic_notes"])
+        assert "approximate" in " ".join(by["country"]["semantic_notes"])
+        assert "Exact distinct counts" not in result["meta"]["sql"][0]
+        assert sum(q.startswith("SELECT\n  COUNT(DISTINCT") for q in result["meta"]["sql"]) == 1
+
+    def test_exact_and_approx_modes(self, warehouse):
+        client, _ = warehouse
+        exact = profile_bigquery("demo.shop.customers", client=client, output_html=None, distinct_counts="exact")
+        assert "COUNT(DISTINCT `country`)" in exact["meta"]["sql"][0] and len(exact["meta"]["sql"]) == 1
+        approx = profile_bigquery("demo.shop.customers", client=client, output_html=None, distinct_counts="approx")
+        assert approx["pk_candidates"] == [] and approx["meta"]["exact_distinct_columns"] == []
+        pk = next(c for c in approx["meta"]["checks"] if c["id"] == "pk")
+        assert pk["status"] == "skipped" and pk["flags"] == ["--distinct-counts", "keys"]
+
+    def test_usage_reports_slot_time_and_shuffle(self, canned):
+        class Stage:
+            def __init__(self, shuffled):
+                self.shuffle_output_bytes = shuffled
+
+        orig = canned.query
+        def query(sql, **kw):
+            job = orig(sql, **kw)
+            job.slot_millis, job.query_plan = 2500, [Stage(1024 ** 3), Stage(512 * 1024 ** 2)]
+            return job
+        canned.query = query
+        messages = []
+        result = BigQueryProfiler(client=canned, progress=messages.append).profile(table="proj.sales.orders")
+        assert result["meta"]["usage_by_section"]["profiling"] == {
+            "queries": 2, "bytes_processed": 4096, "slot_ms": 5000, "shuffle_bytes": 3 * 1024 ** 3}
+        assert any(m.endswith("2.00 KB processed, 2.5 slot-seconds, 1.50 GB shuffled") for m in messages)
+
+    def test_unreported_usage_is_left_out_not_shown_as_zero(self, canned):
+        result = BigQueryProfiler(client=canned).profile(table="proj.sales.orders")
+        usage = result["meta"]["usage_by_section"]["profiling"]
+        assert usage["slot_ms"] is None and usage["shuffle_bytes"] is None
+        from datascope.bigquery import _usage_text
+        assert _usage_text(usage) == "4.00 KB processed"
+
+
+class TestSample:
+    def test_sample_query_shape_and_validation(self):
+        from datascope.bigquery import sample_query
+        assert sample_query("p.d.t") == "SELECT * FROM `p.d.t` TABLESAMPLE SYSTEM (1 PERCENT) LIMIT 1000000"
+        assert sample_query("p.d.t", 0.5, 2000) == "SELECT * FROM `p.d.t` TABLESAMPLE SYSTEM (0.5 PERCENT) LIMIT 2000"
+        with pytest.raises(ValueError, match="percent"):
+            sample_query("p.d.t", 0)
+        with pytest.raises(ValueError, match="max rows"):
+            sample_query("p.d.t", 1, 0)
+
+    def test_profiles_a_capped_sample_and_projects_the_full_run(self, warehouse, dry_run_config):
+        client, df = warehouse
+        messages = []
+        result = BigQueryProfiler(client=client, progress=messages.append).profile(
+            table="demo.shop.customers", sample_percent=100, sample_max_rows=100)
+        meta = result["meta"]
+        assert meta["n_rows"] == 100
+        assert meta["source_name"] == "demo.shop.customers (100% sample)"
+        assert "TABLESAMPLE SYSTEM (100 PERCENT) LIMIT 100" in meta["sql"][0]
+        sm = meta["sample"]
+        assert (sm["sample_rows"], sm["table_rows"], sm["scale"]) == (100, len(df), len(df) / 100)
+        assert sm["full_bytes_processed"] == 5 * 1024 * 1024  # dry run of the full-table query (stand-in figure)
+        assert sm["full_slot_ms"] is None  # the stand-in reports no slot time
+        assert meta["command"]["text"] == ("datascope --bq-table demo.shop.customers --sample --sample-percent 100 "
+                                           "--sample-max-rows 100")
+        assert messages[0] == "Sampling 100% of demo.shop.customers (at most 100 rows)."
+
+    def test_whole_table_sample_is_called_out(self, warehouse):
+        client, df = warehouse
+        sm = profile_bigquery("demo.shop.customers", client=client, output_html=None, sample_percent=100)["meta"]["sample"]
+        assert sm["sample_rows"] == len(df) and "covered the whole table" in sm["warning"]
+
+    def test_slot_time_is_scaled_by_rows(self, canned):
+        canned.row["n_rows"] = 1000
+        orig_get, orig_query = canned.get_table, canned.query
+        canned.get_table = lambda ref: SimpleNamespace(schema=canned.schema, num_bytes=1, num_rows=50_000)
+        def query(sql, **kw):
+            job = orig_query(sql, **kw)
+            job.slot_millis = 1500
+            return job
+        canned.query = query
+        sm = BigQueryProfiler(client=canned).profile(table="proj.sales.orders", sample_percent=2)["meta"]["sample"]
+        # two queries (profile + key recount) x 1.5 s, scaled by 50,000 / 1,000 rows
+        assert sm["scale"] == 50 and sm["full_slot_ms"] == 2 * 1500 * 50
+
+    def test_sample_needs_a_table(self, canned):
+        with pytest.raises(ValueError, match="needs a table"):
+            BigQueryProfiler(client=canned).profile(query="SELECT 1", sample_percent=1)
+
+    def test_cli_sample_flags(self, warehouse, dry_run_config, tmp_path, monkeypatch, capsys):
+        client, _ = warehouse
+        monkeypatch.setattr(BigQueryProfiler, "client", property(lambda self: client))
+        main(["--bq-table", "demo.shop.customers", "--sample-percent", "100", "--sample-max-rows", "50",
+              "-o", str(tmp_path / "s.html")])
+        out = capsys.readouterr().out
+        assert "Sample: 50 rows (100% of demo.shop.customers, which has 500 rows)." in out
+        assert "Profiling the whole table with the same settings would process about 5.00 MB" in out
+        with pytest.raises(SystemExit):
+            main(["--bq-query", "SELECT 1", "--sample"])
+        assert "--sample needs --bq-table" in capsys.readouterr().err

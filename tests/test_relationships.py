@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from datascope.core import DataProfiler
-from datascope.relationships import find_functional_dependencies
+from datascope.relationships import find_column_dependencies
 
 
 def _column_profiles(df):
@@ -25,7 +25,7 @@ def test_near_fd_detected_with_violations():
         "state": state_col,
         "age": rng.integers(18, 80, n),
     })
-    fds = find_functional_dependencies(df, _column_profiles(df))
+    fds = find_column_dependencies(df, _column_profiles(df))
     matches = [fd for fd in fds if fd["determinant"] == "zip" and fd["dependent"] == "state"]
     assert len(matches) == 1
     fd = matches[0]
@@ -41,7 +41,7 @@ def test_exact_fd_detected_with_no_violations():
     currency_map = {"US": "USD", "CA": "CAD", "FR": "EUR", "DE": "EUR"}
     currency = [currency_map[c] for c in country]
     df = pd.DataFrame({"order_id": range(n), "country_code": country, "currency": currency})
-    fds = find_functional_dependencies(df, _column_profiles(df))
+    fds = find_column_dependencies(df, _column_profiles(df))
     matches = [fd for fd in fds if fd["determinant"] == "country_code" and fd["dependent"] == "currency"]
     assert len(matches) == 1
     assert matches[0]["purity"] == 1.0
@@ -54,7 +54,7 @@ def test_independent_columns_produce_no_false_positive():
         "a": rng.choice(list("ABCDE"), 200),
         "b": rng.choice(list("WXYZ"), 200),
     })
-    fds = find_functional_dependencies(df, _column_profiles(df))
+    fds = find_column_dependencies(df, _column_profiles(df))
     assert fds == []
 
 
@@ -71,18 +71,18 @@ def test_near_unique_determinant_does_not_produce_spurious_fd():
         "address": [f"{i} Main St" for i in range(n)],  # unique per row
         "country": rng.choice(["US", "CA", "FR"], n),  # unrelated to address
     })
-    fds = find_functional_dependencies(df, _column_profiles(df))
+    fds = find_column_dependencies(df, _column_profiles(df))
     assert fds == []
 
 
 def test_empty_dataframe_returns_no_dependencies():
     df = pd.DataFrame()
-    assert find_functional_dependencies(df, []) == []
+    assert find_column_dependencies(df, []) == []
 
 
 def test_dataframe_below_min_support_returns_no_dependencies():
     df = pd.DataFrame({"a": [1, 2], "b": ["x", "y"]})
-    fds = find_functional_dependencies(df, _column_profiles(df), min_support_rows=20)
+    fds = find_column_dependencies(df, _column_profiles(df), min_support_rows=20)
     assert fds == []
 
 
@@ -98,6 +98,6 @@ def test_bidirectional_equivalence_reported_once():
         "b": [f"code-{v}" for v in a_vals],
         "filler": ["x"] * n,
     })
-    fds = find_functional_dependencies(df, _column_profiles(df))
+    fds = find_column_dependencies(df, _column_profiles(df))
     pair_count = sum(1 for fd in fds if {fd["determinant"], fd["dependent"]} == {"a", "b"})
     assert pair_count == 1

@@ -72,9 +72,10 @@ class _Job:
 
 
 class _Table:
-    def __init__(self, schema: List[SchemaField], num_bytes: int):
+    def __init__(self, schema: List[SchemaField], num_bytes: int, num_rows: int):
         self.schema = schema
         self.num_bytes = num_bytes
+        self.num_rows = num_rows
 
 
 class DuckDBBigQueryClient:
@@ -96,7 +97,8 @@ class DuckDBBigQueryClient:
     def get_table(self, ref: str) -> _Table:
         desc = self.con.execute(f"DESCRIBE {self._qualify(ref)}").fetchall()
         schema = [_bq_type(r[1])._replace(name=r[0]) for r in desc]
-        return _Table(schema, num_bytes=5 * 1024 * 1024)
+        num_rows = self.con.execute(f"SELECT COUNT(*) FROM {self._qualify(ref)}").fetchone()[0]
+        return _Table(schema, num_bytes=5 * 1024 * 1024, num_rows=num_rows)
 
     def query(self, sql: str, job_config: Any = None, **_: Any) -> _Job:
         if job_config is not None and getattr(job_config, "dry_run", False):

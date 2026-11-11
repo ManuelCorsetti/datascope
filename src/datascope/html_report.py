@@ -38,9 +38,19 @@ def render_html(profile: dict, output_path: str) -> None:
     sanitized = _sanitize(profile)
     json_str = json.dumps(sanitized, default=str)
     json_str_safe = json_str.replace("</", "<\\/")  # don't let data content break out of <script>
-    html = _TEMPLATE.replace("__PROFILE_DATA_JSON__", json_str_safe)
+    html = (_TEMPLATE.replace("__PROFILE_DATA_JSON__", json_str_safe)
+            .replace("__SETTINGS_DOC_JSON__", json.dumps(_settings_doc()).replace("</", "<\\/")))
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
+
+
+def _settings_doc() -> list:
+    """Every setting's flag, default, help and engines, so the report
+    documents the parameters it was run with."""
+    from .settings import GROUPS, flag_name, iter_fields
+    titles = dict(GROUPS)
+    return [{"name": f.name, "flag": flag_name(f.name), "default": f.default, "help": m["help"].replace("%%", "%"),
+             "group": titles[m["group"]], "engines": m["engines"]} for f, m in iter_fields()]
 
 
 _TEMPLATE = r'''<!DOCTYPE html>
@@ -142,15 +152,6 @@ section { margin-bottom: 22px; }
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
 .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 16px 18px; box-shadow: var(--shadow); animation: rise 0.4s ease both; animation-delay: calc(var(--i, 0) * 50ms); }
-.kpi-card-score { display: flex; flex-direction: column; align-items: center; text-align: center; justify-content: center; }
-.score-ring-wrap { position: relative; width: 92px; height: 92px; }
-.score-ring { width: 92px; height: 92px; transform: rotate(-90deg); }
-.score-ring-bg { fill: none; stroke: var(--surface-2); stroke-width: 9; }
-.score-ring-fill { fill: none; stroke: var(--teal); stroke-width: 9; stroke-linecap: round;
-  transition: stroke-dashoffset 0.9s cubic-bezier(.4,0,.2,1); }
-.score-value { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: 24px; font-weight: 600; }
-.kpi-card-label { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-top: 8px; }
 .kpi-icon-badge { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; background: var(--badge-bg, var(--surface-2)); }
 .kpi-icon-badge .icon { color: var(--badge-color, var(--text-muted)); }
 .kpi-value { font-family: var(--font-mono); font-size: 22px; font-weight: 600; }
@@ -160,9 +161,10 @@ section { margin-bottom: 22px; }
 .kpi-link:hover { transform: translateY(-2px); border-color: var(--teal); }
 .kpi-link-arrow { position: absolute; top: 14px; right: 14px; color: var(--text-faint); transition: color .15s ease, transform .15s ease; }
 .kpi-link:hover .kpi-link-arrow, .kpi-link:focus-visible .kpi-link-arrow { color: var(--teal); transform: translateY(2px); }
-#alerts-panel, #columns-section { scroll-margin-top: 76px; }
+#dq-section, #columns-section, #sensitive-panel { scroll-margin-top: 76px; }
 @keyframes flash { from { box-shadow: 0 0 0 3px var(--teal); } to { box-shadow: 0 0 0 3px transparent; } }
 .flash { animation: flash 1.4s ease-out; border-radius: var(--radius); }
+.kpi-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
 .kpi-bar { margin-top: 10px; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .kpi-bar span { display: block; height: 100%; border-radius: 2px; transition: width 0.6s ease; }
 
@@ -171,9 +173,30 @@ section { margin-bottom: 22px; }
 .alert-glyph { color: var(--sev-color, var(--text-muted)); font-size: 12px; margin-top: 2px; flex-shrink: 0; }
 .alert-msg { font-size: 13.5px; color: var(--text); }
 .alert-col { font-family: var(--font-mono); color: var(--text); font-weight: 600; }
+.alert-col-link { font-family: var(--font-mono); font-weight: 600; color: var(--teal); background: none; border: none; padding: 0; cursor: pointer; font-size: inherit; }
+.alert-col-link:hover { text-decoration: underline; }
+.dq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.dq-scope { min-width: 0; padding: 4px 0; }
+.dq-scope + .dq-scope { border-left: 1px solid var(--border); padding-left: 22px; margin-left: 22px; }
+@media (max-width: 880px) {
+  .dq-grid { grid-template-columns: 1fr; }
+  .dq-scope + .dq-scope { border-left: none; margin-left: 0; padding-left: 0; border-top: 1px solid var(--border); margin-top: 18px; padding-top: 18px; }
+}
+.dq-scope-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.scope-tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  padding: 4px 10px 4px 8px; border-radius: 999px; }
+.scope-tag .icon { color: var(--teal); }
+.scope-desc { font-size: 12.5px; color: var(--text-muted); }
+.dq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.dq-tiles .kpi-card { box-shadow: none; }
+.dq-alerts-head { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
+  font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.dq-alerts-head .count { color: var(--text-faint); font-weight: 400; }
 .alert-empty, .empty-state { color: var(--text-faint); font-size: 13px; padding: 6px 0; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.two-col > * { min-width: 0; }  /* let wide heatmaps scroll inside their panel instead of widening the page */
 @media (max-width: 880px) { .two-col { grid-template-columns: 1fr; } }
 
 .dist-row { display: grid; grid-template-columns: 150px 1fr 40px; align-items: center; gap: 10px; padding: 5px 0; font-size: 12.5px; }
@@ -202,6 +225,70 @@ table.heatmap th { padding: 4px 6px; }
 .fd-purity-partial { color: var(--amber); background: var(--amber-soft); }
 .fd-support { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
 
+.ri-row { padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.ri-row:first-child { border-top: none; }
+.ri-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ri-expr { font-family: var(--font-mono); flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.ri-expr .alert-col-link { font-size: 13px; }
+.ri-tag { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+  color: var(--text-muted); background: var(--surface-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.ri-status { font-family: var(--font-mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+  color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
+.ri-detail { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+.ri-detail code { font-family: var(--font-mono); color: var(--text); }
+.sens-intro { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; max-width: 900px; }
+.sens-intro b { color: var(--text); font-weight: 500; }
+.sens-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sens-table th { text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-faint); padding: 6px 12px 6px 0; }
+.sens-table td { padding: 8px 12px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.sens-kind { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+  color: var(--violet); background: var(--violet-soft); padding: 2px 7px; border-radius: 4px; }
+.sens-why { color: var(--text-muted); }
+.sens-conf { font-family: var(--font-mono); white-space: nowrap; }
+.sens-conf .panel-sub { display: block; font-family: var(--font-sans); }
+.detail-why { font-size: 13px; color: var(--text-muted); margin-top: 6px; max-width: 640px; }
+.detail-why b { color: var(--violet); font-weight: 500; }
+.run-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -6px 0 22px; padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: var(--radius-sm); font-size: 13px; }
+.run-strip a { color: var(--teal); font-weight: 500; text-decoration: none; }
+.run-strip a:hover { text-decoration: underline; }
+#run-section { scroll-margin-top: 76px; }
+.run-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.run-table td { padding: 8px 10px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.run-table tr:first-child td { border-top: none; }
+.run-name { font-weight: 500; white-space: nowrap; }
+.run-detail { color: var(--text-muted); }
+.run-flags code, .set-flag { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; color: var(--text); white-space: nowrap; }
+.run-hint { color: var(--text-faint); font-size: 12px; }
+.run-hint, .set-help, .ri-detail { font-variant-ligatures: none; }
+.run-status { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px;
+  border-radius: 4px; white-space: nowrap; color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
+.run-cmd { margin-top: 18px; }
+.run-cmd-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px;
+  font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.run-cmd .code-block { white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-cmd-note { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+details.settings { margin-top: 18px; }
+details.settings summary { cursor: pointer; font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.set-group { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); padding-top: 14px !important; }
+.set-row td { padding: 6px 10px 6px 0; border-top: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+.set-val { font-family: var(--font-mono); white-space: nowrap; }
+.set-changed .set-val { color: var(--teal); font-weight: 600; }
+.set-help { color: var(--text-muted); }
+.set-engine { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+@media (max-width: 640px) {
+  .run-table, .run-table tbody, .run-table tr, .run-table td { display: block; }
+  .run-table tr { border-top: 1px solid var(--border); padding: 8px 0; }
+  .run-table tr:first-child { border-top: none; }
+  .run-table td, .set-row td { border-top: none; padding: 2px 0; }
+  .run-name { white-space: normal; }
+  .run-flags code, .set-flag { white-space: normal; overflow-wrap: anywhere; }
+  .set-engine, .set-default { display: none; }
+  .topbar-meta { flex-wrap: wrap; min-width: 0; }
+  #source-name { overflow-wrap: anywhere; }
+}
 .columns-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .columns-title { font-family: var(--font-mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-muted); font-weight: 600; }
 .column-count { font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); }
@@ -321,19 +408,21 @@ table.heatmap th { padding: 4px 6px; }
 
 <main id="view-dashboard" class="view">
   <section class="kpi-grid" id="kpi-grid">
-    <div class="kpi-card kpi-card-score">
-      <div class="score-ring-wrap">
-        <svg class="score-ring" viewBox="0 0 120 120">
-          <circle class="score-ring-bg" cx="60" cy="60" r="52"></circle>
-          <circle class="score-ring-fill" id="score-ring-fill" cx="60" cy="60" r="52"></circle>
-        </svg>
-        <div class="score-value" id="score-value">&mdash;</div>
-      </div>
-      <div class="kpi-card-label">Quality score</div>
+  </section>
+  <div class="run-strip" id="run-strip" hidden></div>
+
+  <section class="panel" id="dq-section">
+    <div class="panel-title"><span class="material-symbols-outlined icon">fact_check</span>Data quality</div>
+    <div class="dq-grid">
+      <div class="dq-scope" id="dq-table"></div>
+      <div class="dq-scope" id="dq-column"></div>
     </div>
   </section>
 
-  <section class="panel" id="alerts-panel"></section>
+  <section class="panel" id="sensitive-panel" hidden>
+    <div class="panel-title"><span class="material-symbols-outlined icon">shield_person</span>Personal &amp; sensitive data <span class="panel-sub">columns that look like they identify people, or hold health or payment data</span></div>
+    <div id="sensitive-body"></div>
+  </section>
 
   <section class="two-col">
     <div class="panel">
@@ -357,8 +446,14 @@ table.heatmap th { padding: 4px 6px; }
   </section>
 
   <section class="panel" id="fd-panel" style="display:none">
-    <div class="panel-title"><span class="material-symbols-outlined icon">account_tree</span>Column relationships <span class="panel-sub">functional dependencies</span></div>
+    <div class="panel-title"><span class="material-symbols-outlined icon">account_tree</span>Column relationship dependencies <span class="panel-sub">one column&rsquo;s value determines another&rsquo;s</span></div>
+    <p class="sens-intro"><b>A &rarr; B</b> means every row with the same value of A has the same value of B, like zip code &rarr; state. That can point to a redundant column (B could be looked up from A), an undocumented business rule, or, when it holds for almost all rows, the few rows that break the rule and are worth checking.</p>
     <div id="fd-list"></div>
+  </section>
+
+  <section class="panel" id="ri-panel" style="display:none">
+    <div class="panel-title"><span class="material-symbols-outlined icon">conversion_path</span>Referential integrity <span class="panel-sub">do referenced values exist in their key column?</span></div>
+    <div id="ri-list"></div>
   </section>
 
   <section class="columns-section" id="columns-section">
@@ -382,6 +477,11 @@ table.heatmap th { padding: 4px 6px; }
     </div>
     <div id="column-grid" class="column-grid"></div>
   </section>
+
+  <section class="panel" id="run-section" hidden>
+    <div class="panel-title"><span class="material-symbols-outlined icon">fact_check</span>Run summary <span class="panel-sub">what was checked, what wasn't, and how to repeat or extend this run</span></div>
+    <div id="run-body"></div>
+  </section>
 </main>
 
 <main id="view-detail" class="view" hidden>
@@ -389,7 +489,7 @@ table.heatmap th { padding: 4px 6px; }
   <div id="detail-content"></div>
 </main>
 
-<footer class="footer"><span class="material-symbols-outlined icon icon-sm" style="vertical-align:-2px">lock</span> Sensitive values are masked throughout. Type and quality-rule suggestions are heuristic &mdash; verify before enforcing.</footer>
+<footer class="footer"><span class="material-symbols-outlined icon icon-sm" style="vertical-align:-2px">lock</span> Values in columns that look like personal or sensitive data are masked throughout. Type and quality-rule suggestions are heuristic &mdash; verify before enforcing.</footer>
 
 <script>
 const PROFILE = __PROFILE_DATA_JSON__;
@@ -398,9 +498,15 @@ function esc(s) { const d = document.createElement('div'); d.textContent = Strin
 function fmtInt(n) { if (n === null || n === undefined) return '\u2014'; return Number(n).toLocaleString('en-US'); }
 function fmtPct(n, digits) { if (n === null || n === undefined) return '\u2014'; return Number(n).toFixed(digits === undefined ? 1 : digits) + '%'; }
 function fmtNum(n) { if (n === null || n === undefined) return '\u2014'; if (Number.isInteger(n)) return fmtInt(n); return Number(n).toLocaleString('en-US', {maximumFractionDigits: 3}); }
-function fmtBytes(n) { if (n === null || n === undefined) return '\u2014'; if (n < 1024) return n + ' B'; if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB'; return (n/1024/1024).toFixed(2) + ' MB'; }
+function fmtBytes(n) {
+  if (n === null || n === undefined) return '\u2014';
+  if (n < 1024) return n + ' B';
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+  return n.toFixed(i === 0 ? 1 : 2) + ' ' + units[i];
+}
 function titleCase(s) { return String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
-function scoreColor(score) { if (score === null || score === undefined) return 'var(--text-muted)'; if (score >= 80) return 'var(--green)'; if (score >= 50) return 'var(--amber)'; return 'var(--coral)'; }
 
 const TYPE_COLOR = {
   identifier: 'var(--teal)', continuous_numeric: 'var(--teal)',
@@ -511,67 +617,113 @@ function renderHeader() {
   document.title = 'Data Profile \u2014 ' + PROFILE.meta.source_name;
 }
 
-function renderHero() {
-  const score = PROFILE.overview.quality_score;
-  const r = 52, circ = 2 * Math.PI * r;
-  const fillEl = document.getElementById('score-ring-fill');
-  fillEl.style.strokeDasharray = circ.toFixed(2);
-  fillEl.style.strokeDashoffset = circ.toFixed(2);
-  fillEl.style.stroke = scoreColor(score);
-  document.getElementById('score-value').textContent = (score === null || score === undefined) ? '\u2014' : score;
-  document.getElementById('score-value').style.color = scoreColor(score);
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    const pct = (score === null || score === undefined) ? 0 : score/100;
-    fillEl.style.strokeDashoffset = (circ * (1 - pct)).toFixed(2);
-  }));
+// One KPI tile. `t.link` names a KPI_LINKS entry; tiles with nothing to
+// drill into stay static rather than linking somewhere that doesn't
+// explain the number.
+function kpiTile(t, i) {
+  const link = t.link && KPI_LINKS[t.link];
+  const inner =
+    '<div class="kpi-icon-badge" style="--badge-color:' + t.color + ';--badge-bg:' + softBg(t.color) + '">' + icon(t.iconName, 'xl', null, true) + '</div>' +
+    '<div class="kpi-value">' + esc(t.value) + '</div>' +
+    '<div class="kpi-label">' + esc(t.label) + '</div>' +
+    (t.sub ? '<div class="kpi-sub">' + esc(t.sub) + '</div>' : '') +
+    (t.bar !== undefined ? '<div class="kpi-bar"><span style="width:' + t.bar + '%; background:' + t.barColor + '"></span></div>' : '');
+  if (!link) return '<div class="kpi-card" style="--i:' + (i+1) + '">' + inner + '</div>';
+  return '<button type="button" class="kpi-card kpi-link" style="--i:' + (i+1) + '" data-kpi-link="' + t.link + '" title="' + esc(link.hint) + '">' +
+    '<span class="kpi-link-arrow">' + icon('arrow_downward', 'sm') + '</span>' + inner + '</button>';
+}
+function wireKpiLinks(root) {
+  root.querySelectorAll('[data-kpi-link]').forEach(btn => btn.addEventListener('click', () => KPI_LINKS[btn.dataset.kpiLink].go()));
+}
 
+function renderHero() {
   const m = PROFILE.meta, o = PROFILE.overview;
-  const completeness = Math.max(0, 100 - o.total_missing_pct);
-  const alertCount = (o.alerts || []).length;
-  const completenessColor = completeness > 90 ? 'var(--green)' : completeness > 70 ? 'var(--amber)' : 'var(--coral)';
   const nCols = (PROFILE.columns || []).length;
-  // `link` names a KPI_LINKS entry; tiles with nothing to drill into
-  // (rows, duplicates, memory) stay static rather than linking somewhere
-  // that doesn't explain the number.
   const tiles = [
     {label: 'Rows', value: fmtInt(m.n_rows), iconName: 'table_rows', color: 'var(--teal)'},
     {label: 'Columns', value: fmtInt(m.n_cols), iconName: 'view_column', color: 'var(--teal)', link: nCols > 0 ? 'columns' : null},
-    {label: 'Completeness', value: fmtPct(completeness), bar: completeness, barColor: completenessColor, iconName: 'task_alt', color: completenessColor, link: o.total_missing_pct > 0 ? 'missing' : null},
-    {label: 'Duplicate rows', value: fmtInt(m.duplicate_rows) + (m.duplicate_rows_pct ? ' (' + fmtPct(m.duplicate_rows_pct) + ')' : ''), iconName: 'content_copy', color: m.duplicate_rows > 0 ? 'var(--amber)' : 'var(--text-faint)'},
-    {label: 'Sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)', link: o.sensitive_columns_count > 0 ? 'sensitive' : null},
-    {label: 'Alerts', value: fmtInt(alertCount), iconName: 'warning', color: alertCount > 0 ? 'var(--amber)' : 'var(--text-faint)', link: alertCount > 0 ? 'alerts' : null},
-    {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '\u2014' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
+    {label: 'Personal & sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield_person', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)', link: 'sensitive'},
+    {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '—' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
   ];
-  const html = tiles.map((t,i) => {
-    const link = t.link && KPI_LINKS[t.link];
-    const inner =
-      '<div class="kpi-icon-badge" style="--badge-color:' + t.color + ';--badge-bg:' + softBg(t.color) + '">' + icon(t.iconName, 'xl', null, true) + '</div>' +
-      '<div class="kpi-value">' + esc(t.value) + '</div>' +
-      '<div class="kpi-label">' + esc(t.label) + '</div>' +
-      (t.bar !== undefined ? '<div class="kpi-bar"><span style="width:' + t.bar + '%; background:' + t.barColor + '"></span></div>' : '');
-    if (!link) return '<div class="kpi-card" style="--i:' + (i+1) + '">' + inner + '</div>';
-    return '<button type="button" class="kpi-card kpi-link" style="--i:' + (i+1) + '" data-kpi-link="' + t.link + '" title="' + esc(link.hint) + '">' +
-      '<span class="kpi-link-arrow">' + icon('arrow_downward', 'sm') + '</span>' + inner + '</button>';
-  }).join('');
   const grid = document.getElementById('kpi-grid');
-  grid.insertAdjacentHTML('beforeend', html);
-  grid.querySelectorAll('[data-kpi-link]').forEach(btn => btn.addEventListener('click', () => KPI_LINKS[btn.dataset.kpiLink].go()));
+  grid.innerHTML = tiles.map(kpiTile).join('');
+  wireKpiLinks(grid);
+}
+
+const SEVERITY_ORDER = {high:0, sensitive:1, warning:2, info:3};
+function sortAlerts(alerts) {
+  const rank = a => SEVERITY_ORDER[a.severity] === undefined ? 9 : SEVERITY_ORDER[a.severity];
+  return alerts.slice().sort((a,b) => rank(a) - rank(b));
+}
+function alertRows(alerts, emptyMsg) {
+  if (!alerts.length) return '<div class="alert-empty">' + icon('check_circle','sm') + ' ' + esc(emptyMsg) + '</div>';
+  return '<div class="alert-list">' + sortAlerts(alerts).map(a =>
+    '<div class="alert-row" style="--sev-color:' + (SEVERITY_COLOR[a.severity] || 'var(--border)') + '">' +
+      '<span class="alert-glyph">' + icon(SEVERITY_ICON[a.severity] || 'info', 'sm') + '</span>' +
+      '<span class="alert-msg">' + (a.column ? '<button type="button" class="alert-col-link" data-open-col="' + esc(a.column) + '" title="Open column details">' + esc(a.column) + '</button> — ' : '') + esc(a.message) + '</span>' +
+    '</div>').join('') + '</div>';
+}
+function scopeBlock(tagIcon, tagLabel, desc, tiles, alerts, emptyMsg) {
+  return '<div class="dq-scope-head"><span class="scope-tag">' + icon(tagIcon, 'sm') + esc(tagLabel) + '</span><span class="scope-desc">' + esc(desc) + '</span></div>' +
+    '<div class="dq-tiles">' + tiles.map(kpiTile).join('') + '</div>' +
+    '<div class="dq-alerts-head">' + icon('warning', 'sm') + 'Alerts <span class="count">' + alerts.length + '</span></div>' +
+    alertRows(alerts, emptyMsg);
+}
+
+// Table-level vs column-level is decided by the alert itself: alerts tied
+// to one column carry its name, everything else (duplicate rows, identical
+// column pairs, correlations, dependencies, skipped columns) has none.
+function renderQuality() {
+  const m = PROFILE.meta, o = PROFILE.overview, cols = PROFILE.columns || [];
+  const alerts = o.alerts || [];
+  const tableAlerts = alerts.filter(a => !a.column);
+  const columnAlerts = alerts.filter(a => a.column);
+
+  const completeness = Math.max(0, 100 - o.total_missing_pct);
+  const completenessColor = completeness > 90 ? 'var(--green)' : completeness > 70 ? 'var(--amber)' : 'var(--coral)';
+  const totalCells = (m.n_rows || 0) * cols.length;
+  const dupMeasured = m.duplicate_rows !== null && m.duplicate_rows !== undefined;
+  const tableTiles = [
+    {label: 'Completeness', value: cols.length ? fmtPct(completeness) : '—', sub: totalCells ? fmtInt(totalCells - o.total_missing_cells) + ' of ' + fmtInt(totalCells) + ' cells filled' : 'no cells',
+     bar: totalCells ? completeness : undefined, barColor: completenessColor, iconName: 'task_alt', color: completenessColor},
+    {label: 'Duplicate rows', value: dupMeasured ? fmtInt(m.duplicate_rows) : 'Not measured',
+     sub: dupMeasured ? (m.duplicate_rows ? fmtPct(m.duplicate_rows_pct) + ' of rows are exact copies' : 'no exact copies') : 'not computed by this engine',
+     iconName: 'content_copy', color: !dupMeasured ? 'var(--text-faint)' : m.duplicate_rows > 0 ? 'var(--amber)' : 'var(--green)'},
+  ];
+
+  const withMissing = cols.filter(c => c.missing > 0).length;
+  const constant = cols.filter(c => c.semantic_type === 'constant').length;
+  const columnTiles = [
+    {label: 'Columns with missing values', value: fmtInt(withMissing) + ' / ' + fmtInt(cols.length), sub: withMissing ? 'click to sort by missing %' : cols.length ? 'every column fully populated' : 'no columns',
+     iconName: 'help', color: withMissing ? 'var(--amber)' : 'var(--green)', link: withMissing ? 'missing' : null},
+    {label: 'Constant columns', value: fmtInt(constant), sub: constant ? 'single distinct value' : cols.length ? 'none' : 'no columns',
+     iconName: 'block', color: constant ? 'var(--amber)' : 'var(--green)', link: constant ? 'constant' : null},
+  ];
+
+  const tableEl = document.getElementById('dq-table');
+  const colEl = document.getElementById('dq-column');
+  tableEl.innerHTML = scopeBlock('table', 'Table level', 'The dataset as a whole and relationships between columns', tableTiles, tableAlerts, 'No table-level alerts.');
+  colEl.innerHTML = scopeBlock('view_column', 'Column level', 'Individual columns — click a name for details', columnTiles, columnAlerts, 'No column-level alerts.');
+  [tableEl, colEl].forEach(el => {
+    wireKpiLinks(el);
+    el.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  });
 }
 
 // Each KPI link puts the target section into the view that explains the
 // number, then scrolls to it.
 const KPI_LINKS = {
-  columns:   {hint: 'Show all columns',                   go: () => { setColumnView({}); jumpTo('columns-section'); }},
-  missing:   {hint: 'Show columns sorted by missing %',   go: () => { setColumnView({sort: 'missing'}); jumpTo('columns-section'); }},
-  sensitive: {hint: 'Show only sensitive columns',        go: () => { setColumnView({sensitiveOnly: true}); jumpTo('columns-section'); }},
-  alerts:    {hint: 'Jump to alerts',                     go: () => jumpTo('alerts-panel')},
+  columns:   {hint: 'Show all columns',                 go: () => { setColumnView({}); jumpTo('columns-section'); }},
+  missing:   {hint: 'Show columns sorted by missing %', go: () => { setColumnView({sort: 'missing'}); jumpTo('columns-section'); }},
+  constant:  {hint: 'Show only constant columns',       go: () => { setColumnView({types: ['constant']}); jumpTo('columns-section'); }},
+  sensitive: {hint: 'What was flagged, and why',         go: () => jumpTo('sensitive-panel')},
 };
 
 function setColumnView(opts) {
   state.search = '';
   document.getElementById('search-input').value = '';
-  state.typeFilters.clear();
-  document.querySelectorAll('[data-filter-type]').forEach(b => b.classList.remove('active'));
+  state.typeFilters = new Set(opts.types || []);
+  document.querySelectorAll('[data-filter-type]').forEach(b => b.classList.toggle('active', state.typeFilters.has(b.dataset.filterType)));
   state.sensitiveOnly = !!opts.sensitiveOnly;
   const sensBtn = document.querySelector('[data-filter-sensitive]');
   if (sensBtn) { sensBtn.classList.toggle('active', state.sensitiveOnly); sensBtn.setAttribute('aria-pressed', String(state.sensitiveOnly)); }
@@ -588,21 +740,6 @@ function jumpTo(id) {
   el.classList.add('flash');
 }
 
-function renderAlerts() {
-  const panel = document.getElementById('alerts-panel');
-  const alerts = PROFILE.overview.alerts || [];
-  const titleIcon = icon('warning', null);
-  if (!alerts.length) { panel.innerHTML = '<div class="panel-title">' + titleIcon + 'Alerts</div><div class="alert-empty">' + icon('check_circle','sm') + ' No alerts \u2014 nothing stood out.</div>'; return; }
-  const order = {high:0, sensitive:1, warning:2, info:3};
-  const sorted = alerts.slice().sort((a,b) => (order[a.severity] === undefined ? 9 : order[a.severity]) - (order[b.severity] === undefined ? 9 : order[b.severity]));
-  const rows = sorted.map(a =>
-    '<div class="alert-row" style="--sev-color:' + (SEVERITY_COLOR[a.severity] || 'var(--border)') + '">' +
-      '<span class="alert-glyph">' + icon(SEVERITY_ICON[a.severity] || 'info', 'sm') + '</span>' +
-      '<span class="alert-msg">' + (a.column ? '<span class="alert-col">' + esc(a.column) + '</span> \u2014 ' : '') + esc(a.message) + '</span>' +
-    '</div>'
-  ).join('');
-  panel.innerHTML = '<div class="panel-title">' + titleIcon + 'Alerts <span class="panel-sub">' + alerts.length + '</span></div><div class="alert-list">' + rows + '</div>';
-}
 
 function renderTypeDistribution() {
   const dist = PROFILE.overview.type_distribution || {};
@@ -647,12 +784,26 @@ function renderHeatmap(containerId, data, emptyMsg) {
   container.innerHTML = html;
   wireTooltips(container);
 }
-function renderCorrelation() { renderHeatmap('corr-heatmap', PROFILE.correlations, PROFILE.meta.engine === 'bigquery' ? 'Not computed by the BigQuery engine.' : 'Fewer than two numeric columns \u2014 nothing to correlate.'); }
+// Why a heatmap is empty comes from the run summary's record of the check
+// (turned off, nothing to correlate, ...), not a guess from missing data.
+function runCheck(id) { return ((PROFILE.meta || {}).checks || []).find(c => c.id === id); }
+function emptyReason(id, fallback) {
+  const c = runCheck(id);
+  if (!c) return fallback;
+  if (c.status === 'skipped') return 'Turned off for this run. Rerun with <code>' + esc(c.flags.join(' ')) + '</code> to compute it.';
+  return esc(c.detail);
+}
+function renderCorrelation() {
+  renderHeatmap('corr-heatmap', PROFILE.correlations, emptyReason('correlations', 'Fewer than two numeric columns \u2014 nothing to correlate.'));
+}
 function renderMissingCorr() {
   const section = document.getElementById('missing-corr-section');
-  if (!PROFILE.missing_correlation) { section.style.display = 'none'; return; }
+  const c = runCheck('missing_correlation');
+  // Hidden when it has nothing to say (or isn't available on this engine);
+  // shown with the reason when it was turned off, so its absence is explained.
+  if (!PROFILE.missing_correlation && !(c && c.status === 'skipped')) { section.style.display = 'none'; return; }
   section.style.display = '';
-  renderHeatmap('missing-corr-heatmap', PROFILE.missing_correlation, 'Not enough columns with partial missingness.');
+  renderHeatmap('missing-corr-heatmap', PROFILE.missing_correlation, emptyReason('missing_correlation', 'Not enough columns with partial missingness.'));
 }
 function renderPkCandidates() {
   const panel = document.getElementById('pk-panel');
@@ -663,10 +814,10 @@ function renderPkCandidates() {
   list.innerHTML = candidates.map(c => '<div class="pk-row"><span class="pk-type">' + (c.type === 'single' ? 'Single column' : 'Composite') + '</span><span class="pk-cols">' + c.columns.map(esc).join(' + ') + '</span></div>').join('');
 }
 
-function renderFunctionalDependencies() {
+function renderColumnDependencies() {
   const panel = document.getElementById('fd-panel');
   const list = document.getElementById('fd-list');
-  const fds = PROFILE.functional_dependencies || [];
+  const fds = PROFILE.column_dependencies || [];
   if (!fds.length) { panel.style.display = 'none'; return; }
   panel.style.display = '';
   list.innerHTML = fds.map(fd => {
@@ -684,6 +835,192 @@ function renderFunctionalDependencies() {
   wireTooltips(list);
 }
 
+function renderReferentialIntegrity() {
+  const panel = document.getElementById('ri-panel');
+  const list = document.getElementById('ri-list');
+  const checks = (PROFILE.referential_integrity || []).slice()
+    .sort((a,b) => (b.orphans > 0) - (a.orphans > 0) || (a.source === 'declared' ? -1 : 1) - (b.source === 'declared' ? -1 : 1));
+  const suggestions = PROFILE.reference_suggestions || [];
+  const listed = suggestions.filter(s => s.status === 'listed');
+  const overLimit = suggestions.filter(s => s.status === 'over_limit').length;
+  if (!checks.length && !listed.length && !overLimit) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  const highPct = setting('ri_high_orphan_pct', 5);
+  const listedHtml = listed.map(sg =>
+    '<div class="ri-row">' +
+      '<div class="ri-head">' +
+        '<span class="ri-expr"><button type="button" class="alert-col-link" data-open-col="' + esc(sg.column) + '" title="Open column details">' + esc(sg.column) + '</button> <span class="fd-arrow">\u2192</span> <b>' + esc(sg.references) + '</b></span>' +
+        '<span class="ri-tag">suggested</span><span class="ri-tag">same table</span>' +
+        '<span class="ri-status" style="--sev-color:var(--text-muted);--sev-bg:var(--surface-2)">' + icon('schedule', 'sm') + 'not checked</span>' +
+      '</div>' +
+      '<div class="ri-detail">Looks like a reference from its name and data, but checking it is an extra query' +
+        (sg.estimated_bytes !== null && sg.estimated_bytes !== undefined ? ' (about ' + fmtBytes(sg.estimated_bytes) + ' scanned)' : '') +
+        '. Rerun with <code>--suggested-references check</code>.</div>' +
+    '</div>').join('') +
+    (overLimit ? '<div class="ri-row"><div class="ri-detail">' + overLimit + ' more possible reference' + (overLimit === 1 ? '' : 's') +
+      ' over the limit \u2014 raise <code>--max-reference-suggestions</code> (see the run summary).</div></div>' : '');
+  list.innerHTML = checks.map(r => {
+    const bad = r.orphans > 0;
+    const sev = !bad ? 'var(--green)' : (r.source === 'declared' && r.orphan_pct > highPct ? 'var(--coral)' : 'var(--amber)');
+    const status = bad
+      ? icon('link_off', 'sm') + fmtInt(r.orphans) + ' orphan row' + (r.orphans === 1 ? '' : 's') + ' \u00b7 ' + fmtPct(r.orphan_pct, r.orphan_pct < 0.1 ? 3 : 1)
+      : icon('check', 'sm') + 'all matched';
+    const samples = (r.sample_orphans || []).map(s => '<code>' + esc(s.value) + '</code>' + (s.count > 1 ? ' \u00d7' + fmtInt(s.count) : '')).join(', ');
+    const detail = bad
+      ? fmtInt(r.orphan_values) + ' value' + (r.orphan_values === 1 ? '' : 's') + ' not found in <code>' + esc(r.references) + '</code>' + (samples ? ', e.g. ' + samples : '') + (r.orphan_values > (r.sample_orphans || []).length ? ' \u2026' : '')
+      : 'All ' + fmtInt(r.checked) + ' non-null values found in <code>' + esc(r.references) + '</code>.';
+    const tip = r.source === 'suggested'
+      ? 'Suggested from the column names and data \u2014 not declared. Verify it really is a reference.'
+      : 'Declared check.';
+    return '<div class="ri-row">' +
+      '<div class="ri-head">' +
+        '<span class="ri-expr"><button type="button" class="alert-col-link" data-open-col="' + esc(r.column) + '" title="Open column details">' + esc(r.column) + '</button> <span class="fd-arrow">\u2192</span> <b>' + esc(r.references) + '</b></span>' +
+        '<span class="ri-tag" data-tip="' + esc(tip) + '">' + (r.source === 'suggested' ? 'suggested' : 'declared') + '</span>' +
+        '<span class="ri-tag">' + (r.same_table ? 'same table' : 'other table') + '</span>' +
+        '<span class="ri-status" style="--sev-color:' + sev + ';--sev-bg:' + softBg(sev) + '">' + status + '</span>' +
+      '</div>' +
+      '<div class="ri-detail">' + detail + (r.compared_as === 'text' ? ' <span class="panel-sub">(compared as text: the two columns have different types)</span>' : '') + '</div>' +
+    '</div>';
+  }).join('') + listedHtml;
+  list.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  wireTooltips(list);
+}
+
+// Plain-language labels; older profiles only have the PII/PHI/PCI codes.
+const SENS_GROUP = {PII: 'Personal data', PHI: 'Health data', PCI: 'Payment data'};
+function sensGroup(sv) { return sv.category_label || SENS_GROUP[sv.category] || sv.category || 'Sensitive data'; }
+function sensType(sv) { return sv.type_label || String(sv.type || '').replace(/_/g, ' '); }
+function sensLabel(sv) { return sensGroup(sv) + ': ' + sensType(sv); }
+
+function renderSensitive() {
+  const cols = (PROFILE.columns || []).filter(c => c.sensitive && c.sensitive.is_sensitive)
+    .sort((a,b) => b.sensitive.confidence - a.sensitive.confidence);
+  const minConf = setting('sensitive_alert_min_confidence', 0.7);
+  const bq = PROFILE.meta.engine === 'bigquery';
+  let html = '<p class="sens-intro">datascope checks every column\u2019s <b>name</b>' +
+    (bq ? '' : ' and a <b>sample of its values</b>') + ' for <b>personal data</b> (PII: names, email addresses, phone numbers, ' +
+    'postal addresses, ID numbers, dates of birth), <b>health data</b> (PHI: medical records, diagnoses, medication) and ' +
+    '<b>payment data</b> (PCI: card and bank account numbers). Values in flagged columns are <b>masked everywhere in this report</b>. ' +
+    'This is pattern matching to point you at columns worth a review, not a compliance decision.' +
+    (bq ? ' On BigQuery only column names are checked: checking values would mean pulling them out of the warehouse.' : '') + '</p>';
+  if (!cols.length) {
+    html += '<div class="empty-state">' + icon('check_circle', 'sm') + ' No column looks like personal or sensitive data.</div>';
+  } else {
+    html += '<table class="sens-table"><thead><tr><th>Column</th><th>Kind</th><th>Looks like</th><th>Why</th><th>Confidence</th></tr></thead><tbody>' +
+      cols.map(c => {
+        const sv = c.sensitive;
+        const alerted = sv.confidence >= minConf;
+        return '<tr><td><button type="button" class="alert-col-link" data-open-col="' + esc(c.name) + '" title="Open column details">' + esc(c.name) + '</button></td>' +
+          '<td><span class="sens-kind">' + esc(sensGroup(sv)) + '</span></td>' +
+          '<td>' + esc(sensType(sv)) + '</td>' +
+          '<td class="sens-why">' + esc((sv.reasons || []).join(' ') || ((sv.detected_by || []).join(', ').replace(/_/g, ' '))) + '</td>' +
+          '<td class="sens-conf">' + Math.round(sv.confidence * 100) + '%<span class="panel-sub">' +
+            (alerted ? 'alert raised' : 'below the alert threshold (' + Math.round(minConf * 100) + '%)') + '</span></td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+  const body = document.getElementById('sensitive-body');
+  body.innerHTML = html;
+  body.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  document.getElementById('sensitive-panel').hidden = false;
+}
+
+const SETTINGS_DOC = __SETTINGS_DOC_JSON__;
+function setting(name, fallback) {
+  const s = PROFILE.meta && PROFILE.meta.settings;
+  return s && s[name] !== undefined ? s[name] : fallback;
+}
+
+const RUN_STATUS = {
+  ran:              {label: 'ran',            icon: 'check_circle', color: 'var(--green)'},
+  nothing_to_check: {label: 'nothing to do',  icon: 'check_circle', color: 'var(--text-muted)'},
+  partial:          {label: 'partial',        icon: 'contrast',     color: 'var(--amber)'},
+  skipped:          {label: 'skipped',        icon: 'block',        color: 'var(--amber)'},
+  listed:           {label: 'listed',         icon: 'schedule',     color: 'var(--amber)'},
+  not_configured:   {label: 'not set up',     icon: 'add_circle',   color: 'var(--text-muted)'},
+  not_available:    {label: 'not available',  icon: 'do_not_disturb_on', color: 'var(--text-faint)'},
+};
+const EXTENDABLE = ['partial', 'skipped', 'listed'];
+
+function fmtSetting(v) { return typeof v === 'boolean' ? (v ? 'on' : 'off') : String(v); }
+
+function cmdBlock(title, cmd, note) {
+  return '<div class="run-cmd copy-scope"><div class="run-cmd-head"><span>' + esc(title) + '</span>' +
+    '<button class="copy-btn" data-copy>' + icon('content_copy','sm') + 'Copy</button></div>' +
+    '<pre class="code-block"><code>' + esc(cmd.text) + '</code></pre>' +
+    (note ? '<div class="run-cmd-note">' + note + '</div>' : '') + '</div>';
+}
+
+function renderRunSummary() {
+  const meta = PROFILE.meta || {};
+  const checks = meta.checks;
+  if (!checks || !checks.length) return;  // a profile from an older datascope
+  const extendable = checks.filter(c => EXTENDABLE.indexOf(c.status) !== -1);
+  const sm = meta.sample;
+  const sampleShort = sm ? 'This report profiles a ' + fmtNum(sm.percent) + '% sample (' + fmtInt(sm.sample_rows) + ' rows) of ' +
+    esc(sm.table) + (sm.table_rows !== null && sm.table_rows !== undefined ? ', which has ' + fmtInt(sm.table_rows) + ' rows' : '') + '.' : '';
+  const strip = document.getElementById('run-strip');
+  if (extendable.length || sm) {
+    strip.hidden = false;
+    strip.innerHTML = icon('info', 'sm', 'color:var(--amber)') + '<span>' + (sm ? sampleShort + ' ' : '') +
+      (extendable.length ? extendable.length + ' check' + (extendable.length === 1 ? ' was' : 's were') +
+        ' capped, skipped or only listed in this run: ' + extendable.map(c => esc(c.name)).join(', ') + '.' : '') + '</span>' +
+      '<a href="#run-section" id="run-strip-link">' + (extendable.length ? 'See how to extend it' : 'See the full-table projection') + ' \u2193</a>';
+    document.getElementById('run-strip-link').addEventListener('click', e => { e.preventDefault(); jumpTo('run-section'); });
+  }
+
+  const rows = checks.map(c => {
+    const st = RUN_STATUS[c.status] || RUN_STATUS.ran;
+    const action = (EXTENDABLE.indexOf(c.status) !== -1 && c.flags.length)
+      ? '<span class="run-flags">' + '<code>' + esc(c.flags.join(' ')) + '</code></span>'
+      : (c.hint ? '<span class="run-hint">' + esc(c.hint) + '</span>' : '');
+    return '<tr><td><span class="run-status" style="--sev-color:' + st.color + ';--sev-bg:' + softBg(st.color) + '">' + icon(st.icon, 'sm') + st.label + '</span></td>' +
+      '<td class="run-name">' + esc(c.name) + '</td>' +
+      '<td class="run-detail-cell"><div class="run-detail">' + esc(c.detail) + '</div>' + (action ? '<div style="margin-top:4px">' + action + '</div>' : '') + '</td></tr>';
+  }).join('');
+
+  let html = '';
+  if (sm) {
+    const full = [];
+    if (sm.full_bytes_processed !== null && sm.full_bytes_processed !== undefined)
+      full.push('process about <b>' + fmtBytes(sm.full_bytes_processed) + '</b> (from a free dry run; what on-demand pricing bills)');
+    if (sm.full_slot_ms !== null && sm.full_slot_ms !== undefined)
+      full.push('use roughly <b>' + fmtInt(Math.round(sm.full_slot_ms / 1000)) + ' slot-seconds</b> (this run\u2019s slot time \u00d7 ' +
+        fmtNum(Math.round(sm.scale * 10) / 10) + ', the table/sample row ratio; a rough guide)');
+    if (sm.warning) html += '<p class="sens-intro"><b>' + esc(sm.warning) + '</b></p>';
+    html += '<p class="sens-intro">' + sampleShort + ' Every figure in it describes the sample, not the whole table, and each query ' +
+      're-sampled, so steps can differ slightly. Keys and references found in a sample may not hold for the whole table.' +
+      (full.length ? ' Profiling the whole table with the same settings would ' + full.join(' and ') + '.' : '') + '</p>';
+  }
+  html += '<table class="run-table"><tbody>' + rows + '</tbody></table>';
+  const placeholderNote = 'Replace <code>INPUT</code>/<code>PATH:COLUMN</code>: this run was started from Python, so the data had no file name.';
+  if (meta.extend_command) html += cmdBlock('Extend this run', meta.extend_command, (meta.extend_command.complete ? '' : placeholderNote));
+  if (meta.command) html += cmdBlock('Reproduce this run', meta.command, (meta.command.complete ? '' : placeholderNote));
+
+  const used = meta.settings || {};
+  const engine = meta.engine;
+  const changed = SETTINGS_DOC.filter(d => used[d.name] !== undefined && used[d.name] !== d.default).length;
+  let group = null, setRows = '';
+  SETTINGS_DOC.forEach(d => {
+    if (d.group !== group) { group = d.group; setRows += '<tr><td colspan="4" class="set-group">' + esc(group) + '</td></tr>'; }
+    const v = used[d.name];
+    const isChanged = v !== undefined && v !== d.default;
+    const applies = d.engines === 'both' || d.engines === engine;
+    setRows += '<tr class="set-row' + (isChanged ? ' set-changed' : '') + '"' + (applies ? '' : ' style="opacity:.55"') + '>' +
+      '<td><span class="set-flag">' + esc(d.flag) + '</span></td>' +
+      '<td class="set-val">' + esc(v === undefined ? '\u2014' : fmtSetting(v)) + (isChanged ? ' <span class="set-default panel-sub">(default ' + esc(fmtSetting(d.default)) + ')</span>' : '') + '</td>' +
+      '<td class="set-help">' + esc(d.help) + '</td>' +
+      '<td class="set-engine">' + (d.engines === 'both' ? '' : esc(d.engines) + ' only') + '</td></tr>';
+  });
+  html += '<details class="settings"><summary>All settings \u2014 ' + (changed ? changed + ' changed from default' : 'all defaults') +
+    (meta.datascope_version ? ' \u00b7 datascope ' + esc(meta.datascope_version) : '') + '</summary>' +
+    '<table class="run-table" style="margin-top:8px"><tbody>' + setRows + '</tbody></table></details>';
+
+  const body = document.getElementById('run-body');
+  body.innerHTML = html;
+  document.getElementById('run-section').hidden = false;
+  wireCopyButtons(body);
+}
+
 const state = { search: '', sensitiveOnly: false, typeFilters: new Set(), sort: 'name' };
 
 function renderFilterChips() {
@@ -691,7 +1028,7 @@ function renderFilterChips() {
   const types = Object.keys(dist).sort((a,b) => dist[b]-dist[a]);
   const sensCount = PROFILE.overview.sensitive_columns_count;
   let html = '';
-  if (sensCount > 0) html += '<button class="chip chip-sensitive" data-filter-sensitive="1">Sensitive <span class="chip-count">' + sensCount + '</span></button>';
+  if (sensCount > 0) html += '<button class="chip chip-sensitive" data-filter-sensitive="1">Personal &amp; sensitive <span class="chip-count">' + sensCount + '</span></button>';
   html += types.map(t => '<button class="chip" data-filter-type="' + esc(t) + '">' + esc(titleCase(t)) + ' <span class="chip-count">' + dist[t] + '</span></button>').join('');
   document.getElementById('filter-chips').innerHTML = html;
   document.querySelectorAll('[data-filter-type]').forEach(btn => btn.addEventListener('click', () => {
@@ -735,7 +1072,7 @@ function renderColumnGrid() {
       '<div class="col-card-head">' +
         '<span class="col-glyph">' + icon(TYPE_ICON[c.semantic_type]||'help', 'xl', 'color:' + (TYPE_COLOR[c.semantic_type]||'var(--text-muted)'), true) + '</span>' +
         '<span class="col-name" title="' + esc(c.name) + '">' + esc(c.name) + '</span>' +
-        (c.sensitive.is_sensitive ? '<span class="material-symbols-outlined icon icon-sm sens-icon" title="Flagged ' + esc(c.sensitive.category) + '">lock</span>' : '') +
+        (c.sensitive.is_sensitive ? '<span class="material-symbols-outlined icon icon-sm sens-icon" title="' + esc(sensLabel(c.sensitive)) + '">lock</span>' : '') +
       '</div>' +
       '<div class="col-type-label">' + esc(titleCase(c.semantic_type)) + ' \u00b7 ' + esc(c.dtype) + '</div>' +
       renderBars(spec, 'sm') +
@@ -796,7 +1133,7 @@ function renderDbtBlock(snippet) {
 function wireCopyButtons(root) {
   root.querySelectorAll('[data-copy]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const code = btn.closest('.dbt-block').querySelector('code');
+      const code = btn.closest('.dbt-block, .copy-scope').querySelector('code');
       const text = code.textContent;
       const done = () => { const orig = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = orig, 1200); };
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => {});
@@ -813,8 +1150,11 @@ function renderDetail(col) {
     '<div class="detail-badges">' +
       '<span class="badge" style="--badge-color:' + (TYPE_COLOR[col.semantic_type]||'var(--text-muted)') + ';--badge-bg:' + softBg(TYPE_COLOR[col.semantic_type]||'var(--text-muted)') + '">' + esc(titleCase(col.semantic_type)) + ' \u00b7 ' + Math.round(col.semantic_type_confidence*100) + '%</span>' +
       '<span class="badge">' + esc(col.dtype) + '</span>' +
-      (col.sensitive.is_sensitive ? '<span class="badge" style="--badge-color:var(--violet);--badge-bg:var(--violet-soft)">' + esc(col.sensitive.category) + ' \u00b7 ' + esc(titleCase(col.sensitive.type)) + ' \u00b7 ' + Math.round(col.sensitive.confidence*100) + '%</span>' : '') +
+      (col.sensitive.is_sensitive ? '<span class="badge" style="--badge-color:var(--violet);--badge-bg:var(--violet-soft)">' + esc(sensLabel(col.sensitive)) + ' \u00b7 ' + Math.round(col.sensitive.confidence*100) + '% confidence</span>' : '') +
     '</div>' +
+    (col.sensitive.is_sensitive ? '<p class="detail-why"><b>Why it looks like ' + esc(sensGroup(col.sensitive).toLowerCase()) + ':</b> ' +
+      esc((col.sensitive.reasons || []).join(' ') || 'Flagged by ' + (col.sensitive.detected_by || []).join(' and ').replace(/_/g, ' ') + '.') +
+      ' Its values are masked in this report.</p>' : '') +
     (col.semantic_notes && col.semantic_notes.length ? '<p class="detail-note">' + col.semantic_notes.map(esc).join(' ') + '</p>' : '') +
   '</div>');
 
@@ -860,12 +1200,15 @@ document.getElementById('back-btn').addEventListener('click', showDashboard);
 
 renderHeader();
 renderHero();
-renderAlerts();
+renderQuality();
+renderSensitive();
 renderTypeDistribution();
 renderCorrelation();
 renderMissingCorr();
 renderPkCandidates();
-renderFunctionalDependencies();
+renderColumnDependencies();
+renderReferentialIntegrity();
+renderRunSummary();
 renderFilterChips();
 renderColumnGrid();
 </script>
