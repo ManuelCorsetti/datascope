@@ -776,12 +776,26 @@ function renderHeatmap(containerId, data, emptyMsg) {
   container.innerHTML = html;
   wireTooltips(container);
 }
-function renderCorrelation() { renderHeatmap('corr-heatmap', PROFILE.correlations, 'Fewer than two numeric columns \u2014 nothing to correlate.'); }
+// Why a heatmap is empty comes from the run summary's record of the check
+// (turned off, nothing to correlate, ...), not a guess from missing data.
+function runCheck(id) { return ((PROFILE.meta || {}).checks || []).find(c => c.id === id); }
+function emptyReason(id, fallback) {
+  const c = runCheck(id);
+  if (!c) return fallback;
+  if (c.status === 'skipped') return 'Turned off for this run. Rerun with <code>' + esc(c.flags.join(' ')) + '</code> to compute it.';
+  return esc(c.detail);
+}
+function renderCorrelation() {
+  renderHeatmap('corr-heatmap', PROFILE.correlations, emptyReason('correlations', 'Fewer than two numeric columns \u2014 nothing to correlate.'));
+}
 function renderMissingCorr() {
   const section = document.getElementById('missing-corr-section');
-  if (!PROFILE.missing_correlation) { section.style.display = 'none'; return; }
+  const c = runCheck('missing_correlation');
+  // Hidden when it has nothing to say (or isn't available on this engine);
+  // shown with the reason when it was turned off, so its absence is explained.
+  if (!PROFILE.missing_correlation && !(c && c.status === 'skipped')) { section.style.display = 'none'; return; }
   section.style.display = '';
-  renderHeatmap('missing-corr-heatmap', PROFILE.missing_correlation, 'Not enough columns with partial missingness.');
+  renderHeatmap('missing-corr-heatmap', PROFILE.missing_correlation, emptyReason('missing_correlation', 'Not enough columns with partial missingness.'));
 }
 function renderPkCandidates() {
   const panel = document.getElementById('pk-panel');
