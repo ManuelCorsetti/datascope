@@ -215,6 +215,17 @@ table.heatmap th { padding: 4px 6px; }
 .fd-purity-partial { color: var(--amber); background: var(--amber-soft); }
 .fd-support { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
 
+.ri-row { padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.ri-row:first-child { border-top: none; }
+.ri-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ri-expr { font-family: var(--font-mono); flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.ri-expr .alert-col-link { font-size: 13px; }
+.ri-tag { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+  color: var(--text-muted); background: var(--surface-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.ri-status { font-family: var(--font-mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+  color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
+.ri-detail { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+.ri-detail code { font-family: var(--font-mono); color: var(--text); }
 .columns-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .columns-title { font-family: var(--font-mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-muted); font-weight: 600; }
 .column-count { font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); }
@@ -368,6 +379,11 @@ table.heatmap th { padding: 4px 6px; }
   <section class="panel" id="fd-panel" style="display:none">
     <div class="panel-title"><span class="material-symbols-outlined icon">account_tree</span>Column relationships <span class="panel-sub">functional dependencies</span></div>
     <div id="fd-list"></div>
+  </section>
+
+  <section class="panel" id="ri-panel" style="display:none">
+    <div class="panel-title"><span class="material-symbols-outlined icon">conversion_path</span>Referential integrity <span class="panel-sub">do referenced values exist in their key column?</span></div>
+    <div id="ri-list"></div>
   </section>
 
   <section class="columns-section" id="columns-section">
@@ -723,6 +739,40 @@ function renderFunctionalDependencies() {
   wireTooltips(list);
 }
 
+function renderReferentialIntegrity() {
+  const panel = document.getElementById('ri-panel');
+  const list = document.getElementById('ri-list');
+  const checks = (PROFILE.referential_integrity || []).slice()
+    .sort((a,b) => (b.orphans > 0) - (a.orphans > 0) || (a.source === 'declared' ? -1 : 1) - (b.source === 'declared' ? -1 : 1));
+  if (!checks.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  list.innerHTML = checks.map(r => {
+    const bad = r.orphans > 0;
+    const sev = !bad ? 'var(--green)' : (r.source === 'declared' && r.orphan_pct > 5 ? 'var(--coral)' : 'var(--amber)');
+    const status = bad
+      ? icon('link_off', 'sm') + fmtInt(r.orphans) + ' orphan row' + (r.orphans === 1 ? '' : 's') + ' \u00b7 ' + fmtPct(r.orphan_pct, r.orphan_pct < 0.1 ? 3 : 1)
+      : icon('check', 'sm') + 'all matched';
+    const samples = (r.sample_orphans || []).map(s => '<code>' + esc(s.value) + '</code>' + (s.count > 1 ? ' \u00d7' + fmtInt(s.count) : '')).join(', ');
+    const detail = bad
+      ? fmtInt(r.orphan_values) + ' value' + (r.orphan_values === 1 ? '' : 's') + ' not found in <code>' + esc(r.references) + '</code>' + (samples ? ', e.g. ' + samples : '') + (r.orphan_values > (r.sample_orphans || []).length ? ' \u2026' : '')
+      : 'All ' + fmtInt(r.checked) + ' non-null values found in <code>' + esc(r.references) + '</code>.';
+    const tip = r.source === 'suggested'
+      ? 'Suggested from the column names and data \u2014 not declared. Verify it really is a reference.'
+      : 'Declared check.';
+    return '<div class="ri-row">' +
+      '<div class="ri-head">' +
+        '<span class="ri-expr"><button type="button" class="alert-col-link" data-open-col="' + esc(r.column) + '" title="Open column details">' + esc(r.column) + '</button> <span class="fd-arrow">\u2192</span> <b>' + esc(r.references) + '</b></span>' +
+        '<span class="ri-tag" data-tip="' + esc(tip) + '">' + (r.source === 'suggested' ? 'suggested' : 'declared') + '</span>' +
+        '<span class="ri-tag">' + (r.same_table ? 'same table' : 'other table') + '</span>' +
+        '<span class="ri-status" style="--sev-color:' + sev + ';--sev-bg:' + softBg(sev) + '">' + status + '</span>' +
+      '</div>' +
+      '<div class="ri-detail">' + detail + (r.compared_as === 'text' ? ' <span class="panel-sub">(compared as text: the two columns have different types)</span>' : '') + '</div>' +
+    '</div>';
+  }).join('');
+  list.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  wireTooltips(list);
+}
+
 const state = { search: '', sensitiveOnly: false, typeFilters: new Set(), sort: 'name' };
 
 function renderFilterChips() {
@@ -905,6 +955,7 @@ renderCorrelation();
 renderMissingCorr();
 renderPkCandidates();
 renderFunctionalDependencies();
+renderReferentialIntegrity();
 renderFilterChips();
 renderColumnGrid();
 </script>

@@ -9,7 +9,7 @@ import pytest
 
 from datascope import BigQueryProfiler, DataProfiler, estimate_bigquery_cost, profile_bigquery
 from datascope.bigquery import (UnsupportedColumnWarning, _query_from_clause, _table_from_clause, build_profile_sql,
-                                correlation_expressions, format_bytes, quote_identifier)
+                                build_reference_sql, correlation_expressions, format_bytes, quote_identifier)
 from datascope.cli import main
 from datascope.html_report import _sanitize
 from datascope.semantic import infer_semantic_type_from_summary
@@ -61,6 +61,14 @@ class TestSqlGeneration:
         sql = build_profile_sql("`p.d.t`", [("a", "INT64", "NULLABLE")], extra=exprs)
         assert sql.count("FROM ") == 1 and ",\nFROM" not in sql
         assert sql.rstrip().split("\n")[-2].endswith("AS corr__2__5")
+
+    def test_reference_sql_is_one_anti_join(self):
+        sql = build_reference_sql("`p.d.orders`", "customer_id", "`p.d.customers`", "id")
+        assert "FROM (SELECT `customer_id` AS v FROM `p.d.orders` AS _datascope_src WHERE `customer_id` IS NOT NULL) AS child" in sql
+        assert "LEFT JOIN (SELECT DISTINCT `id` AS v FROM `p.d.customers` AS _datascope_ref WHERE `id` IS NOT NULL) AS parent" in sql
+        assert "WHERE parent.v IS NULL" in sql and sql.endswith("LIMIT 5")
+        text = build_reference_sql("`p.d.orders`", "customer_id", "`p.d.customers`", "id", as_text=True)
+        assert "CAST(`customer_id` AS STRING) AS v" in text and "CAST(`id` AS STRING) AS v" in text
 
     def test_unknown_type_raises_instead_of_guessing(self):
         with pytest.raises(ValueError, match=r"'VECTOR'.*'emb'"):
@@ -218,6 +226,33 @@ class TestProfileShape:
         assert "CORR(" not in BigQueryProfiler(client=canned, max_correlation_cols=1).build_sql("proj.sales.orders")[0]
         result = BigQueryProfiler(client=canned, max_correlation_cols=0).profile(table="proj.sales.orders")
         assert result["correlations"] is None and result["high_correlation_pairs"] == []
+
+    def test_declared_references_are_planned_and_validated(self, canned):
+        canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
+        sqls = BigQueryProfiler(client=canned, max_reference_suggestions=0).build_sql(
+            "proj.sales.orders", references={"ORDER_ID": "proj.sales.orders.order_id", "amount": "order_id"})
+        assert len(sqls) == 3
+        assert "FROM `proj.sales.orders` AS _datascope_ref" in sqls[1]
+        assert "CAST(`amount` AS STRING)" not in sqls[2]  # NUMERIC vs INT64: both numeric, compared natively
+        with pytest.raises(ValueError, match="not among the profiled columns"):
+            BigQueryProfiler(client=canned).build_sql("proj.sales.orders", references={"nope": "order_id"})
+        with pytest.raises(ValueError, match="'zzz' was not found"):
+            BigQueryProfiler(client=canned).build_sql("proj.sales.orders", references={"amount": "zzz"})
+        # the email column vs an INT64 key: compared as text rather than failing in BigQuery
+        sql = BigQueryProfiler(client=canned).build_sql("proj.sales.orders",
+                                                        references={"customer_email": "order_id"})[1]
+        assert "CAST(`customer_email` AS STRING)" in sql
+
+    def test_suggestions_are_estimated_but_only_run_when_parent_is_a_key(self, canned, dry_run_config):
+        canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
+        profiler = BigQueryProfiler(client=canned)
+        planned = profiler.build_sql("proj.sales.orders")
+        assert len(planned) == 2 and "`parent_order_id` AS v" in planned[1]
+        assert profiler.estimate(table="proj.sales.orders")["queries"] == 2
+        # canned row has no stats for parent_order_id -> not a plausible child, nothing extra runs
+        result = profiler.profile(table="proj.sales.orders")
+        assert len(result["meta"]["sql"]) == 1 and result["referential_integrity"] == []
+        assert BigQueryProfiler(client=canned, max_reference_suggestions=0).build_sql("proj.sales.orders") == planned[:1]
 
     def test_wide_tables_are_split_into_batches(self, canned):
         result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
@@ -445,6 +480,37 @@ class TestExecutedAgainstRealData:
         np.testing.assert_allclose(got["correlations"]["matrix"], want["correlations"]["matrix"], atol=0.002)
         assert {(p["col1"], p["col2"]) for p in got["high_correlation_pairs"]} == \
                {(p["col1"], p["col2"]) for p in want["high_correlation_pairs"]}
+
+    def test_referential_integrity_agrees_with_pandas_engine(self, warehouse):
+        client, _ = warehouse
+        rng = np.random.default_rng(5)
+        n = 300
+        customers = pd.DataFrame({"id": np.arange(1, 201)})
+        orders = pd.DataFrame({
+            "order_id": np.arange(1, n + 1),
+            "customer_id": rng.integers(1, 215, n),
+            "parent_order_id": pd.array(np.where(rng.random(n) < 0.5, rng.integers(1, n + 1, n), None), dtype="Int64"),
+            "quantity": rng.integers(1, 6, n),
+            "sku": rng.choice(["A1", "B2", "C3"], n),
+        })
+        orders.loc[[5, 6], "parent_order_id"] = 5000
+        client.load("ri_customers", customers)
+        client.load("ri_orders", orders)
+
+        got = profile_bigquery("demo.shop.ri_orders", client=client, output_html=None,
+                               references={"customer_id": "demo.shop.ri_customers.id", "sku": "order_id"})
+        want = DataProfiler().profile(orders, references={
+            "customer_id": ("demo.shop.ri_customers.id", customers["id"]), "sku": "order_id"})
+        key = lambda r: (r["column"], r["references"], r["source"], r["same_table"], r["checked"],
+                         r["orphans"], r["orphan_values"], r["compared_as"] == "text")
+        assert sorted(map(key, got["referential_integrity"])) == sorted(map(key, want["referential_integrity"]))
+        by_col = {r["column"]: r for r in got["referential_integrity"]}
+        assert by_col["parent_order_id"]["source"] == "suggested"
+        assert by_col["parent_order_id"]["sample_orphans"] == [{"value": "5000", "count": 2}]
+        assert by_col["sku"]["orphans"] == n  # text vs integer ids: compared as text, nothing matches
+        assert {r["column"]: r["sample_orphans"] for r in got["referential_integrity"]} == \
+               {r["column"]: r["sample_orphans"] for r in want["referential_integrity"]}
+        assert sum("_datascope_ref" in q for q in got["meta"]["sql"]) == 3
 
     def test_query_profile_covers_every_result_column(self, warehouse):
         client, df = warehouse

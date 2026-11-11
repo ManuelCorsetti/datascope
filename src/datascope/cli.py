@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import warnings
 
@@ -16,6 +17,12 @@ def main() -> None:
     parser.add_argument("--name", default=None, help="Source name shown in the report (default: input filename)")
     parser.add_argument("--sample-size", type=int, default=1000, help="Rows sampled per column for PII/PHI content checks")
     parser.add_argument("--open", action="store_true", help="Open the report in your browser when done")
+    parser.add_argument(
+        "--reference", action="append", default=[], metavar="CHILD=PARENT",
+        help="Referential-integrity check (repeatable): every value of column CHILD must exist in PARENT. "
+             "PARENT is a column of the same table, another file's column as PATH:COLUMN, or with BigQuery "
+             "a column of another table as PROJECT.DATASET.TABLE.COLUMN",
+    )
 
     bq = parser.add_argument_group(
         "BigQuery", "Profile inside BigQuery instead of loading a file (needs the 'bigquery' extra)."
@@ -37,6 +44,12 @@ def main() -> None:
     bq_sources = [s for s in (args.bq_table, args.bq_query, args.bq_query_file) if s]
     if len(bq_sources) + (1 if args.input else 0) != 1:
         parser.error("give exactly one source: an input file, --bq-table, --bq-query or --bq-query-file")
+    references = {}
+    for spec in args.reference:
+        child, sep, parent = spec.partition("=")
+        if not sep or not child.strip() or not parent.strip():
+            parser.error(f"--reference expects CHILD=PARENT, got {spec!r}")
+        references[child.strip()] = parent.strip()
 
     if bq_sources:
         from .bigquery import BigQueryProfiler
@@ -54,11 +67,12 @@ def main() -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             if args.estimate:
-                est = profiler.estimate(table=args.bq_table, query=query, columns=columns)
+                est = profiler.estimate(table=args.bq_table, query=query, columns=columns, references=references)
             elif args.print_sql:
-                sqls = profiler.build_sql(table=args.bq_table, query=query, columns=columns)
+                sqls = profiler.build_sql(table=args.bq_table, query=query, columns=columns, references=references)
             else:
-                result = profiler.profile(table=args.bq_table, query=query, columns=columns, source_name=args.name)
+                result = profiler.profile(table=args.bq_table, query=query, columns=columns, source_name=args.name,
+                                          references=references)
         for w in caught:
             print(f"Warning: {w.message}", file=sys.stderr)
         if args.estimate:
@@ -71,19 +85,34 @@ def main() -> None:
             return
         profiler.to_html(result, args.output)
         if args.open:
-            import os
             import webbrowser
             webbrowser.open(f"file://{os.path.abspath(args.output)}")
     else:
-        from .core import profile
+        from .core import DataProfiler, profile
 
-        profile(
-            args.input,
-            output_html=args.output,
-            source_name=args.name,
-            open_browser=args.open,
-            sample_size_for_content_checks=args.sample_size,
-        )
+        resolved = {}
+        for child, parent in references.items():
+            path, sep, column = parent.rpartition(":")
+            if sep and os.path.isfile(path):
+                other = DataProfiler()._load(path)
+                if column not in other.columns:
+                    parser.error(f"--reference {child}={parent}: {path} has no column {column!r}")
+                resolved[child] = (f"{os.path.basename(path)}:{column}", other[column])
+            else:
+                resolved[child] = parent
+        try:
+            profile(
+                args.input,
+                output_html=args.output,
+                source_name=args.name,
+                open_browser=args.open,
+                sample_size_for_content_checks=args.sample_size,
+                references=resolved,
+            )
+        except ValueError as exc:
+            if "references" not in str(exc):
+                raise
+            parser.error(str(exc))
     print(f"Report written to {args.output}")
 
 

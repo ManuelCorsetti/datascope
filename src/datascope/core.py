@@ -19,6 +19,7 @@ from .stats import (
 from .semantic import infer_semantic_type
 from .pii import detect_sensitive_data, mask_value
 from .quality import recommend_rules, generate_dbt_snippet
+from .referential import Reference, alerts_for, find_referential_integrity
 from .relationships import find_functional_dependencies
 from .html_report import render_html
 
@@ -37,6 +38,7 @@ class DataProfiler:
         random_state: int = 42,
         fd_min_purity: float = 0.98,
         max_fd_candidate_pool: int = 25,
+        suggest_references: bool = True,
     ):
         self.sample_size_for_content_checks = sample_size_for_content_checks
         self.histogram_bins = histogram_bins
@@ -47,6 +49,7 @@ class DataProfiler:
         self.random_state = random_state
         self.fd_min_purity = fd_min_purity
         self.max_fd_candidate_pool = max_fd_candidate_pool
+        self.suggest_references = suggest_references
 
     # ---------------------------------------------------------------- load
     def _load(self, data: Union[pd.DataFrame, str]) -> pd.DataFrame:
@@ -68,7 +71,18 @@ class DataProfiler:
         raise TypeError("data must be a pandas DataFrame or a path to a csv/tsv/parquet/xlsx/json file")
 
     # ------------------------------------------------------------- profile
-    def profile(self, data: Union[pd.DataFrame, str], source_name: Optional[str] = None) -> Dict[str, Any]:
+    def profile(self, data: Union[pd.DataFrame, str], source_name: Optional[str] = None,
+                references: Optional[Dict[str, Reference]] = None) -> Dict[str, Any]:
+        """Profile `data`.
+
+        `references` declares referential-integrity checks, as
+        {child column: parent}. The parent is another column of this
+        table (its name), another table's key column (a Series), or
+        (label, Series) to name it in the report, e.g.
+        {"customer_id": ("customers.id", customers["id"])}. Likely
+        same-table references are also suggested unless the profiler was
+        built with suggest_references=False.
+        """
         df = self._load(data)
         n_rows = len(df)
         n_cols = len(df.columns)
@@ -97,6 +111,8 @@ class DataProfiler:
         functional_dependencies = find_functional_dependencies(
             df, column_profiles, min_purity=self.fd_min_purity, max_candidate_pool=self.max_fd_candidate_pool,
         )
+        referential_integrity = find_referential_integrity(df, column_profiles, references,
+                                                           suggest=self.suggest_references)
 
         meta = {
             "source_name": str(source_name),
@@ -125,10 +141,11 @@ class DataProfiler:
             "high_correlation_pairs": high_correlation_pairs,
             "duplicate_columns": duplicate_columns,
             "functional_dependencies": functional_dependencies,
+            "referential_integrity": referential_integrity,
         }
         result["overview"]["alerts"] = self._build_alerts(column_profiles, duplicate_rows, n_rows,
                                                             high_correlation_pairs, duplicate_columns,
-                                                            functional_dependencies)
+                                                            functional_dependencies) + alerts_for(referential_integrity)
         return result
 
     # -------------------------------------------------------- per column
@@ -339,14 +356,16 @@ def profile(
     output_html: str = "data_profile_report.html",
     source_name: Optional[str] = None,
     open_browser: bool = False,
+    references: Optional[Dict[str, Reference]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """One-liner: profile `data` (a DataFrame or a csv/parquet/xlsx/json
     path) and write an interactive HTML report to `output_html`. Returns
     the underlying profile dict too, in case you want it directly
-    (e.g. to feed a CI data-quality gate)."""
+    (e.g. to feed a CI data-quality gate). `references` declares
+    referential-integrity checks — see `DataProfiler.profile`."""
     profiler = DataProfiler(**kwargs)
-    result = profiler.profile(data, source_name=source_name)
+    result = profiler.profile(data, source_name=source_name, references=references)
     profiler.to_html(result, output_html)
     if open_browser:
         import webbrowser

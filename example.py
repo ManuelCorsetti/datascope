@@ -74,14 +74,29 @@ df = pd.DataFrame({
     "schema_version": 1,  # constant column on purpose
 })
 
+# A self-reference with a few dangling ids: datascope suggests
+# referred_by_customer_id -> customer_id from the names and flags the
+# orphans. (Separate RNG so the columns above stay as they were.)
+ref_rng = np.random.default_rng(11)
+referred_by = np.where(ref_rng.random(N) < 0.3, ref_rng.integers(1, N + 1, N), np.nan)
+referred_by[ref_rng.choice(np.flatnonzero(~np.isnan(referred_by)), 7, replace=False)] = [9001, 9001, 9001, 9002, 9002, 9003, 9004]
+df.insert(1, "referred_by_customer_id", pd.array(referred_by, dtype="Int64"))
+
+# A small lookup table from "another system" that has fallen behind:
+# it doesn't know about Sweden yet. Checked as a declared reference below.
+countries = pd.DataFrame({"code": ["US", "GB", "DE", "FR", "CA", "AU", "NL"]})
+
 # inject some exact duplicate rows
 dupe_rows = df.sample(12, random_state=1)
 df = pd.concat([df, dupe_rows], ignore_index=True)
 
 if __name__ == "__main__":
-    result = profile(df, output_html="example_report.html", source_name="customers_demo.csv")
+    result = profile(df, output_html="example_report.html", source_name="customers_demo.csv",
+                     references={"country_code": ("countries.code", countries["code"])})
     print(f"Rows: {result['meta']['n_rows']}, Columns: {result['meta']['n_cols']}")
     print(f"Completeness: {100 - result['overview']['total_missing_pct']:.1f}%, "
           f"duplicate rows: {result['meta']['duplicate_rows']}")
     print(f"Sensitive columns flagged: {result['overview']['sensitive_columns_count']}")
+    for r in result["referential_integrity"]:
+        print(f"Reference {r['column']} -> {r['references']} ({r['source']}): {r['orphans']} orphan row(s)")
     print("-> example_report.html")

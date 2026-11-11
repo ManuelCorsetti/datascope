@@ -41,9 +41,36 @@ Or from the command line:
 python -m datascope your_data.csv -o report.html --open
 ```
 
+### Referential integrity
+
+Check that every value in a column exists in a key column — in the same
+table, or in another one. NULLs are not counted as orphans, as with a
+SQL foreign key:
+
+```python
+customers = pd.read_csv("customers.csv")
+profile(orders, references={
+    "customer_id": ("customers.id", customers["id"]),  # another table: (label, key column)
+    "parent_order_id": "order_id",                     # same table: a column name
+})
+```
+
+```
+python -m datascope orders.csv --reference customer_id=customers.csv:id --reference parent_order_id=order_id
+```
+
+The report gets a Referential integrity panel (orphan row count and
+percentage, distinct missing values, the most common examples), and any
+orphans raise a column-level alert. datascope also **suggests**
+same-table references on its own when a column's name points at an
+identifier column (`referred_by_customer_id` -> `customer_id`, or any
+`*_id` -> a column called `id`) and at least 90% of its values match.
+Value overlap alone isn't enough, because surrogate keys 1..N overlap by
+chance. Turn suggestions off with `DataProfiler(suggest_references=False)`.
+
 Try it first on synthetic data (customers table with realistic messiness
 baked in — PII, a couple of quality bugs, correlated missingness,
-duplicate rows):
+duplicate rows, dangling references):
 
 ```
 python example.py
@@ -89,7 +116,12 @@ datascope --bq-table my-project.sales.orders -o orders.html
 datascope --bq-table my-project.sales.orders --columns order_id,amount -o orders.html
 datascope --bq-query-file recent_orders.sql -o recent_orders.html
 datascope --bq-table my-project.sales.orders --print-sql     # just show the SQL, run nothing
+datascope --bq-table my-project.sales.orders --reference customer_id=my-project.sales.customers.id
 ```
+
+Referential-integrity checks take a same-table column name or a
+`project.dataset.table.column` reference:
+`profile_bigquery("my-project.sales.orders", references={"customer_id": "my-project.sales.customers.id"})`.
 
 **Check the cost first.** A dry run tells you how much data the profile
 will scan — the same figure the BigQuery console shows before you press
@@ -132,6 +164,12 @@ columns come from `CORR()` in the same scan.
   in the first profiling query (first `max_correlation_cols=30` numeric
   columns; `0` turns them off). They agree with the pandas engine; the
   missing-value correlation matrix is not computed.
+- Each referential-integrity check is one extra query: an anti-join that
+  reads only the two key columns and returns at most five rows. Declared
+  checks always run. Up to `max_reference_suggestions=5` suggested ones
+  are planned from column names (so `--estimate` and `--print-sql`
+  include them) but only run if the profile shows the parent column is
+  really a key.
 - Not computed yet (each needs extra passes over the data): histograms,
   outlier counts, skew/kurtosis, duplicate rows, composite
   keys, functional dependencies, and detecting dates stored as text.
@@ -182,6 +220,8 @@ columns come from `CORR()` in the same scan.
 - Functional dependency detection (does column A determine column B, e.g.
   `zip -> state`? — a bounded, evidence-weighted search flags near- and
   exact dependencies, with counter-example rows for anything short of 100%)
+- **Referential-integrity checks**, declared (same table or another
+  table) or suggested from column names — see above
 - An alerts panel surfacing all of the above at a glance
 
 ## Notes / assumptions
@@ -206,8 +246,9 @@ src/datascope/
   stats.py         numeric/string/datetime/boolean stat + histogram calculators
   semantic.py      semantic type inference
   pii.py           PII/PHI/PCI detection + value masking
-  quality.py       quality-rule + dbt-snippet recommendations, quality score
+  quality.py       quality-rule + dbt-snippet recommendations
   relationships.py functional dependency detection (column A -> column B)
+  referential.py   referential-integrity checks (declared and suggested references)
   html_report.py   renders the profile dict to the HTML dashboard
   bigquery.py      BigQuery engine: generates profiling SQL, maps results to the profile dict
   cli.py / __main__.py   `python -m datascope`
