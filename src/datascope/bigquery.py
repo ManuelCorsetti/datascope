@@ -324,6 +324,23 @@ def _usage_text(usage: Dict[str, Optional[int]]) -> str:
     return ", ".join(parts)
 
 
+DEFAULT_SAMPLE_PERCENT = 1.0
+DEFAULT_SAMPLE_MAX_ROWS = 1_000_000
+
+
+def sample_query(table: str, percent: float = DEFAULT_SAMPLE_PERCENT,
+                 max_rows: int = DEFAULT_SAMPLE_MAX_ROWS) -> str:
+    """SELECT * from a random `percent` of the table's storage blocks
+    (TABLESAMPLE SYSTEM: only those blocks are read and billed), capped at
+    `max_rows` rows. Each run picks a different sample."""
+    if not 0 < percent <= 100:
+        raise ValueError(f"sample percent must be > 0 and <= 100, got {percent!r}")
+    if max_rows < 1:
+        raise ValueError(f"sample max rows must be >= 1, got {max_rows!r}")
+    return (f"SELECT * FROM {_table_from_clause(table)} TABLESAMPLE SYSTEM ({percent:g} PERCENT) "
+            f"LIMIT {int(max_rows)}")
+
+
 def build_distinct_sql(from_clause: str, columns: Sequence[Tuple[int, str, str, str]]) -> str:
     """Exact distinct counts for a few columns (field index, name, type,
     mode), as `c<i>__distinct`: the second step of distinct_counts="keys"."""
@@ -703,13 +720,29 @@ class BigQueryProfiler:
 
     def profile(self, table: Optional[str] = None, query: Optional[str] = None,
                 columns: Optional[Sequence[str]] = None, source_name: Optional[str] = None,
-                references: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                references: Optional[Dict[str, str]] = None, sample_percent: Optional[float] = None,
+                sample_max_rows: int = DEFAULT_SAMPLE_MAX_ROWS) -> Dict[str, Any]:
         """`references` declares referential-integrity checks as {child
         column: parent}, where the parent is a column of the same source
         ("customer_id") or of another table
-        ("project.dataset.customers.id")."""
+        ("project.dataset.customers.id").
+
+        `sample_percent` (with `table`) profiles a random sample instead:
+        `SELECT * ... TABLESAMPLE SYSTEM (p PERCENT) LIMIT sample_max_rows`.
+        `result["meta"]["sample"]` then also projects what a full run would
+        cost: bytes from a free dry run of the full-table queries, slot
+        time scaled up from the sample by rows (a rough guide). Each query
+        re-samples, so steps can see slightly different rows."""
         st = self.settings
-        self._say(f"Reading the schema of {table or 'the query'} ...")
+        sampled_table, given_name = None, source_name
+        if sample_percent is not None:
+            if table is None:
+                raise ValueError("Sampling needs a table (sample_percent with table=...), not a query.")
+            sampled_table = table
+            query, table = sample_query(table, sample_percent, sample_max_rows), None
+            source_name = source_name or f"{_table_from_clause(sampled_table).strip('`')} ({sample_percent:g}% sample)"
+            self._say(f"Sampling {sample_percent:g}% of {sampled_table} (at most {sample_max_rows:,} rows).")
+        self._say(f"Reading the schema of {table or sampled_table or 'the query'} ...")
         plan = self._plan(table, query, columns, references)
         fields, sqls, skipped = plan.fields, plan.sqls, plan.skipped
         self._say(f"Profiling {len(fields)} columns in {len(sqls)} quer{'y' if len(sqls) == 1 else 'ies'}"
@@ -837,11 +870,16 @@ class BigQueryProfiler:
             "n_exact": len(self._exact_columns),
             "declared": len(references or {}), "suggestions": reference_suggestions,
         })
+        if sampled_table is not None:
+            meta["sample"] = self._sample_projection(sampled_table, sample_percent, sample_max_rows, n_rows,
+                                                     columns, references)
         finish_run_summary(meta, st, checks, {
-            "table": plan.default_name if table is not None else None,
-            "query": query,
+            "table": plan.default_name if table is not None else (
+                _table_from_clause(sampled_table).strip("`") if sampled_table else None),
+            "query": query if sampled_table is None else None,
+            "sample": (sample_percent, sample_max_rows) if sampled_table else None,
             "columns": list(columns) if columns else None,
-            "source_name": source_name,
+            "source_name": given_name,
             "references": [f"{child}={ref}" for child, ref in (references or {}).items()],
             "connection": {"project": self.project, "location": self.location,
                            "maximum_bytes_billed": self.maximum_bytes_billed},
@@ -851,6 +889,37 @@ class BigQueryProfiler:
     def to_html(self, profile_dict: Dict[str, Any], output_path: str) -> str:
         render_html(profile_dict, output_path)
         return output_path
+
+    def _sample_projection(self, table: str, percent: float, max_rows: int, sample_rows: int,
+                           columns: Optional[Sequence[str]], references: Optional[Dict[str, str]]) -> Dict[str, Any]:
+        """What the same profile of the whole table would use. Bytes: a
+        free dry run of the full-table queries (BigQuery's own figure, an
+        upper bound). Slot time: this run's slot time x table rows / sample
+        rows, a rough linear guide (large queries rarely scale exactly)."""
+        ref = _table_from_clause(table).strip("`")
+        table_rows = getattr(self.client.get_table(ref), "num_rows", None)
+        table_rows = int(table_rows) if table_rows is not None else None
+        out: Dict[str, Any] = {"table": ref, "percent": percent, "max_rows": max_rows,
+                               "sample_rows": sample_rows, "table_rows": table_rows,
+                               "full_bytes_processed": None, "full_slot_ms": None, "scale": None}
+        if self._can_dry_run():
+            self._say(f"Projecting a full run of {ref} (free dry run) ...")
+            plan = self._plan(ref, None, columns, references)
+            out["full_bytes_processed"] = sum(self._dry_run_bytes(q) for q in plan.sqls + [c.sql for c in plan.ref_checks])
+        # TABLESAMPLE SYSTEM picks whole storage blocks, so a small table
+        # (stored in few blocks) can come back whole, or empty.
+        if sample_rows == 0:
+            out["warning"] = ("The sample came back empty: TABLESAMPLE picks whole storage blocks, and a small "
+                              "table may have very few. Raise --sample-percent.")
+        elif table_rows and sample_rows >= table_rows:
+            out["warning"] = ("The sample covered the whole table: TABLESAMPLE picks whole storage blocks, and "
+                              "this table is small enough to be stored in very few. The figures are the full run's.")
+        slot_ms = [u["slot_ms"] for u in self._usage.values() if u.get("slot_ms") is not None]
+        if table_rows and sample_rows:
+            out["scale"] = table_rows / sample_rows
+            if slot_ms:
+                out["full_slot_ms"] = int(sum(slot_ms) * out["scale"])
+        return out
 
     def _possible_keys(self, fields: Sequence[Tuple[str, str, str]], row: Dict[str, Any],
                        n_rows: int) -> List[Tuple[int, str, str, str]]:
@@ -1042,6 +1111,8 @@ def profile_bigquery(
     source_name: Optional[str] = None,
     open_browser: bool = False,
     references: Optional[Dict[str, str]] = None,
+    sample_percent: Optional[float] = None,
+    sample_max_rows: int = DEFAULT_SAMPLE_MAX_ROWS,
     **kwargs,
 ) -> Dict[str, Any]:
     """One-liner: profile a BigQuery `table` ("project.dataset.table") or
@@ -1060,7 +1131,8 @@ def profile_bigquery(
     """
     profiler = BigQueryProfiler(**kwargs)
     result = profiler.profile(table=table, query=query, columns=columns, source_name=source_name,
-                              references=references)
+                              references=references, sample_percent=sample_percent,
+                              sample_max_rows=sample_max_rows)
     if output_html:
         profiler.to_html(result, output_html)
         if open_browser:

@@ -17,7 +17,7 @@ was *not* checked as clearly as what was.
 from __future__ import annotations
 
 import shlex
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .settings import BIGQUERY, PANDAS, Settings, setting_tokens
 
@@ -217,13 +217,20 @@ def bigquery_checks(s: Settings, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
 def build_command(engine: str, s: Settings, *, source: Optional[str] = None, query: Optional[str] = None,
                   table: Optional[str] = None, source_name: Optional[str] = None,
                   references: Optional[List[str]] = None, columns: Optional[Sequence[str]] = None,
-                  connection: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                  connection: Optional[Dict[str, Any]] = None,
+                  sample: Optional[Tuple[float, int]] = None) -> Dict[str, Any]:
     """argv/text reproducing a run. `references` are CHILD=PARENT strings
     (None entries mark a reference the CLI can't express)."""
     argv = ["datascope"]
     placeholders = []
     if engine == BIGQUERY:
         argv += ["--bq-table", table] if table else ["--bq-query", query or ""]
+        if sample:
+            argv += ["--sample"]
+            if sample[0] != 1:
+                argv += ["--sample-percent", f"{sample[0]:g}"]
+            if sample[1] != 1_000_000:
+                argv += ["--sample-max-rows", str(sample[1])]
         if columns:
             argv += ["--columns", ",".join(columns)]
         for key, flag in (("project", "--bq-project"), ("location", "--bq-location"),

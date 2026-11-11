@@ -65,6 +65,15 @@ def build_parser() -> argparse.ArgumentParser:
     bq.add_argument("--bq-table", default=None, metavar="PROJECT.DATASET.TABLE", help="Table to profile")
     bq.add_argument("--bq-query", default=None, metavar="SQL", help="SQL query whose result to profile")
     bq.add_argument("--bq-query-file", default=None, metavar="PATH", help="File containing the SQL query to profile")
+    bq.add_argument("--sample", action="store_true",
+                    help="Profile a random sample of --bq-table instead of all of it: SELECT * ... TABLESAMPLE "
+                         "SYSTEM (1 PERCENT) LIMIT 1000000. Cheap, and after the run it projects what profiling the "
+                         "whole table would use: bytes from a free dry run, slot time scaled up from the sample. "
+                         "Each query re-samples, so steps can see slightly different rows.")
+    bq.add_argument("--sample-percent", type=float, default=None, metavar="X",
+                    help="Share of the table's storage blocks to sample, 0-100 (default: 1; implies --sample)")
+    bq.add_argument("--sample-max-rows", type=int, default=None, metavar="N",
+                    help="Cap on sampled rows (default: 1000000; implies --sample)")
     bq.add_argument("--columns", default=None, help="Comma-separated subset of columns to profile (default: all)")
     bq.add_argument("--bq-project", default=None, help="Project that runs (and is billed for) the queries")
     bq.add_argument("--bq-location", default=None, help="BigQuery location, e.g. EU or US")
@@ -114,6 +123,23 @@ def _settings_from(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         raise  # pragma: no cover
 
 
+def _sample_text(sm: Dict[str, Any]) -> str:
+    from .bigquery import format_bytes
+    lines = [f"Sample: {sm['sample_rows']:,} rows ({sm['percent']:g}% of {sm['table']}"
+             + (f", which has {sm['table_rows']:,} rows" if sm["table_rows"] is not None else "") + ")."]
+    if sm.get("warning"):
+        lines.append(sm["warning"])
+    full = []
+    if sm["full_bytes_processed"] is not None:
+        full.append(f"process about {format_bytes(sm['full_bytes_processed'])} (free dry run; what on-demand pricing bills)")
+    if sm["full_slot_ms"] is not None:
+        full.append(f"use roughly {sm['full_slot_ms'] / 1000:,.0f} slot-seconds (this run's slot time x "
+                    f"{sm['scale']:,.1f}, the table/sample row ratio; a rough guide, large queries don't scale exactly)")
+    if full:
+        lines.append("Profiling the whole table with the same settings would " + " and ".join(full) + ".")
+    return "\n".join(lines)
+
+
 def _print_estimate(est: Dict[str, Any]) -> None:
     width = max(len(s["section"]) for s in est["sections"])
     print(f"This profile will process {est['bytes_processed_human']} when run "
@@ -149,8 +175,14 @@ def _main(argv: Optional[List[str]] = None) -> None:
             parser.error(f"--reference expects CHILD=PARENT, got {spec!r}")
         references[child.strip()] = parent.strip()
 
+    sample = args.sample or args.sample_percent is not None or args.sample_max_rows is not None
+    if sample and not args.bq_table:
+        parser.error("--sample needs --bq-table (it samples a table)")
+    sample_percent = args.sample_percent if args.sample_percent is not None else 1.0
+    sample_max_rows = args.sample_max_rows if args.sample_max_rows is not None else 1_000_000
+
     if bq_sources:
-        from .bigquery import BigQueryProfiler
+        from .bigquery import BigQueryProfiler, sample_query
 
         query = args.bq_query
         if args.bq_query_file:
@@ -164,15 +196,20 @@ def _main(argv: Optional[List[str]] = None) -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             try:
+                # --estimate / --print-sql with --sample describe the sample query.
+                source = ({"query": sample_query(args.bq_table, sample_percent, sample_max_rows)} if sample
+                          else {"table": args.bq_table, "query": query})
                 if args.estimate:
-                    est = profiler.estimate(table=args.bq_table, query=query, columns=columns, references=references)
+                    est = profiler.estimate(columns=columns, references=references, **source)
                 elif args.print_sql:
-                    sqls = profiler.build_sql(table=args.bq_table, query=query, columns=columns, references=references)
+                    sqls = profiler.build_sql(columns=columns, references=references, **source)
                 else:
                     result = profiler.profile(table=args.bq_table, query=query, columns=columns,
-                                              source_name=args.name, references=references)
+                                              source_name=args.name, references=references,
+                                              sample_percent=sample_percent if sample else None,
+                                              sample_max_rows=sample_max_rows)
             except ValueError as exc:
-                if "references" not in str(exc):
+                if "references" not in str(exc) and "sample" not in str(exc):
                     raise
                 parser.error(str(exc))
         for w in caught:
@@ -222,6 +259,9 @@ def _main(argv: Optional[List[str]] = None) -> None:
             for section, usage in meta["usage_by_section"].items():
                 print(f"  {section:<11} {usage['queries']} quer{'y' if usage['queries'] == 1 else 'ies'}: "
                       + _usage_text(usage))
+        if meta.get("sample"):
+            print()
+            print(_sample_text(meta["sample"]))
         print()
         print(format_text(meta))
 

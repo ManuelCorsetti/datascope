@@ -114,7 +114,9 @@ def build_result(column: str, references: str, source: str, same_table: bool, ch
         "same_table": same_table,
         "checked": int(checked),
         "orphans": int(orphans),
-        "orphan_pct": round(100 * orphans / checked, 3) if checked else 0.0,
+        # min(): on a re-sampled BigQuery source the check can see a few more
+        # rows than the profile counted; never report more than 100%.
+        "orphan_pct": min(100.0, round(100 * orphans / checked, 3)) if checked else 0.0,
         "orphan_values": int(orphan_values),
         "sample_orphans": [{"value": show(v), "count": int(n)} for v, n in samples[:sample_n]],
         "compared_as": compared_as,

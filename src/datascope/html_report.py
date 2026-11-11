@@ -497,7 +497,14 @@ function esc(s) { const d = document.createElement('div'); d.textContent = Strin
 function fmtInt(n) { if (n === null || n === undefined) return '\u2014'; return Number(n).toLocaleString('en-US'); }
 function fmtPct(n, digits) { if (n === null || n === undefined) return '\u2014'; return Number(n).toFixed(digits === undefined ? 1 : digits) + '%'; }
 function fmtNum(n) { if (n === null || n === undefined) return '\u2014'; if (Number.isInteger(n)) return fmtInt(n); return Number(n).toLocaleString('en-US', {maximumFractionDigits: 3}); }
-function fmtBytes(n) { if (n === null || n === undefined) return '\u2014'; if (n < 1024) return n + ' B'; if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB'; return (n/1024/1024).toFixed(2) + ' MB'; }
+function fmtBytes(n) {
+  if (n === null || n === undefined) return '\u2014';
+  if (n < 1024) return n + ' B';
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+  return n.toFixed(i === 0 ? 1 : 2) + ' ' + units[i];
+}
 function titleCase(s) { return String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
 
 const TYPE_COLOR = {
@@ -947,12 +954,16 @@ function renderRunSummary() {
   const checks = meta.checks;
   if (!checks || !checks.length) return;  // a profile from an older datascope
   const extendable = checks.filter(c => EXTENDABLE.indexOf(c.status) !== -1);
+  const sm = meta.sample;
+  const sampleShort = sm ? 'This report profiles a ' + fmtNum(sm.percent) + '% sample (' + fmtInt(sm.sample_rows) + ' rows) of ' +
+    esc(sm.table) + (sm.table_rows !== null && sm.table_rows !== undefined ? ', which has ' + fmtInt(sm.table_rows) + ' rows' : '') + '.' : '';
   const strip = document.getElementById('run-strip');
-  if (extendable.length) {
+  if (extendable.length || sm) {
     strip.hidden = false;
-    strip.innerHTML = icon('info', 'sm', 'color:var(--amber)') + '<span>' + extendable.length + ' check' + (extendable.length === 1 ? ' was' : 's were') +
-      ' capped, skipped or only listed in this run: ' + extendable.map(c => esc(c.name)).join(', ') + '.</span>' +
-      '<a href="#run-section" id="run-strip-link">See how to extend it \u2193</a>';
+    strip.innerHTML = icon('info', 'sm', 'color:var(--amber)') + '<span>' + (sm ? sampleShort + ' ' : '') +
+      (extendable.length ? extendable.length + ' check' + (extendable.length === 1 ? ' was' : 's were') +
+        ' capped, skipped or only listed in this run: ' + extendable.map(c => esc(c.name)).join(', ') + '.' : '') + '</span>' +
+      '<a href="#run-section" id="run-strip-link">' + (extendable.length ? 'See how to extend it' : 'See the full-table projection') + ' \u2193</a>';
     document.getElementById('run-strip-link').addEventListener('click', e => { e.preventDefault(); jumpTo('run-section'); });
   }
 
@@ -966,7 +977,20 @@ function renderRunSummary() {
       '<td class="run-detail-cell"><div class="run-detail">' + esc(c.detail) + '</div>' + (action ? '<div style="margin-top:4px">' + action + '</div>' : '') + '</td></tr>';
   }).join('');
 
-  let html = '<table class="run-table"><tbody>' + rows + '</tbody></table>';
+  let html = '';
+  if (sm) {
+    const full = [];
+    if (sm.full_bytes_processed !== null && sm.full_bytes_processed !== undefined)
+      full.push('process about <b>' + fmtBytes(sm.full_bytes_processed) + '</b> (from a free dry run; what on-demand pricing bills)');
+    if (sm.full_slot_ms !== null && sm.full_slot_ms !== undefined)
+      full.push('use roughly <b>' + fmtInt(Math.round(sm.full_slot_ms / 1000)) + ' slot-seconds</b> (this run\u2019s slot time \u00d7 ' +
+        fmtNum(Math.round(sm.scale * 10) / 10) + ', the table/sample row ratio; a rough guide)');
+    if (sm.warning) html += '<p class="sens-intro"><b>' + esc(sm.warning) + '</b></p>';
+    html += '<p class="sens-intro">' + sampleShort + ' Every figure in it describes the sample, not the whole table, and each query ' +
+      're-sampled, so steps can differ slightly. Keys and references found in a sample may not hold for the whole table.' +
+      (full.length ? ' Profiling the whole table with the same settings would ' + full.join(' and ') + '.' : '') + '</p>';
+  }
+  html += '<table class="run-table"><tbody>' + rows + '</tbody></table>';
   const placeholderNote = 'Replace <code>INPUT</code>/<code>PATH:COLUMN</code>: this run was started from Python, so the data had no file name.';
   if (meta.extend_command) html += cmdBlock('Extend this run', meta.extend_command, (meta.extend_command.complete ? '' : placeholderNote));
   if (meta.command) html += cmdBlock('Reproduce this run', meta.command, (meta.command.complete ? '' : placeholderNote));

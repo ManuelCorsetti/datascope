@@ -740,3 +740,65 @@ class TestDistinctCountModes:
         assert usage["slot_ms"] is None and usage["shuffle_bytes"] is None
         from datascope.bigquery import _usage_text
         assert _usage_text(usage) == "4.00 KB processed"
+
+
+class TestSample:
+    def test_sample_query_shape_and_validation(self):
+        from datascope.bigquery import sample_query
+        assert sample_query("p.d.t") == "SELECT * FROM `p.d.t` TABLESAMPLE SYSTEM (1 PERCENT) LIMIT 1000000"
+        assert sample_query("p.d.t", 0.5, 2000) == "SELECT * FROM `p.d.t` TABLESAMPLE SYSTEM (0.5 PERCENT) LIMIT 2000"
+        with pytest.raises(ValueError, match="percent"):
+            sample_query("p.d.t", 0)
+        with pytest.raises(ValueError, match="max rows"):
+            sample_query("p.d.t", 1, 0)
+
+    def test_profiles_a_capped_sample_and_projects_the_full_run(self, warehouse, dry_run_config):
+        client, df = warehouse
+        messages = []
+        result = BigQueryProfiler(client=client, progress=messages.append).profile(
+            table="demo.shop.customers", sample_percent=100, sample_max_rows=100)
+        meta = result["meta"]
+        assert meta["n_rows"] == 100
+        assert meta["source_name"] == "demo.shop.customers (100% sample)"
+        assert "TABLESAMPLE SYSTEM (100 PERCENT) LIMIT 100" in meta["sql"][0]
+        sm = meta["sample"]
+        assert (sm["sample_rows"], sm["table_rows"], sm["scale"]) == (100, len(df), len(df) / 100)
+        assert sm["full_bytes_processed"] == 5 * 1024 * 1024  # dry run of the full-table query (stand-in figure)
+        assert sm["full_slot_ms"] is None  # the stand-in reports no slot time
+        assert meta["command"]["text"] == ("datascope --bq-table demo.shop.customers --sample --sample-percent 100 "
+                                           "--sample-max-rows 100")
+        assert messages[0] == "Sampling 100% of demo.shop.customers (at most 100 rows)."
+
+    def test_whole_table_sample_is_called_out(self, warehouse):
+        client, df = warehouse
+        sm = profile_bigquery("demo.shop.customers", client=client, output_html=None, sample_percent=100)["meta"]["sample"]
+        assert sm["sample_rows"] == len(df) and "covered the whole table" in sm["warning"]
+
+    def test_slot_time_is_scaled_by_rows(self, canned):
+        canned.row["n_rows"] = 1000
+        orig_get, orig_query = canned.get_table, canned.query
+        canned.get_table = lambda ref: SimpleNamespace(schema=canned.schema, num_bytes=1, num_rows=50_000)
+        def query(sql, **kw):
+            job = orig_query(sql, **kw)
+            job.slot_millis = 1500
+            return job
+        canned.query = query
+        sm = BigQueryProfiler(client=canned).profile(table="proj.sales.orders", sample_percent=2)["meta"]["sample"]
+        # two queries (profile + key recount) x 1.5 s, scaled by 50,000 / 1,000 rows
+        assert sm["scale"] == 50 and sm["full_slot_ms"] == 2 * 1500 * 50
+
+    def test_sample_needs_a_table(self, canned):
+        with pytest.raises(ValueError, match="needs a table"):
+            BigQueryProfiler(client=canned).profile(query="SELECT 1", sample_percent=1)
+
+    def test_cli_sample_flags(self, warehouse, dry_run_config, tmp_path, monkeypatch, capsys):
+        client, _ = warehouse
+        monkeypatch.setattr(BigQueryProfiler, "client", property(lambda self: client))
+        main(["--bq-table", "demo.shop.customers", "--sample-percent", "100", "--sample-max-rows", "50",
+              "-o", str(tmp_path / "s.html")])
+        out = capsys.readouterr().out
+        assert "Sample: 50 rows (100% of demo.shop.customers, which has 500 rows)." in out
+        assert "Profiling the whole table with the same settings would process about 5.00 MB" in out
+        with pytest.raises(SystemExit):
+            main(["--bq-query", "SELECT 1", "--sample"])
+        assert "--sample needs --bq-table" in capsys.readouterr().err

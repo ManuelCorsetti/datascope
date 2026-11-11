@@ -148,6 +148,36 @@ est["estimated_cost_usd"]      # bytes x on-demand price (default $6.25/TiB)
 datascope --bq-table my-project.sales.orders --estimate
 ```
 
+**Try it on a sample first.** `--sample` profiles a random 1% of the
+table, capped at 1,000,000 rows, instead of all of it:
+
+```
+datascope --bq-table my-project.sales.orders --sample
+datascope --bq-table my-project.sales.orders --sample --sample-percent 5 --sample-max-rows 200000
+```
+
+That runs `SELECT * FROM <table> TABLESAMPLE SYSTEM (1 PERCENT) LIMIT
+1000000`, which reads, and bills, only the sampled storage blocks. After
+the run it projects what profiling the whole table with the same settings
+would use:
+
+```
+Sample: 8,412 rows (1% of my-project.sales.orders, which has 841,003 rows).
+Profiling the whole table with the same settings would process about 1.21 GB (free dry run; what
+on-demand pricing bills) and use roughly 420 slot-seconds (this run's slot time x 100.0, ...).
+```
+
+The slot-time figure is the sample's slot time scaled up by rows: a rough
+guide, since large queries don't scale exactly. Things to know: every
+figure in the report describes the sample, and keys or references found
+in a sample may not hold for the whole table. Each query re-samples, so
+the profiling, key and reference steps can see slightly different rows.
+`TABLESAMPLE` picks whole storage blocks, so a small table may come back
+whole or empty; the output says so when that happens. `--sample` also
+works with `--estimate` and `--print-sql`, which then describe the sample
+query. In Python: `profile_bigquery(table, sample_percent=1,
+sample_max_rows=1_000_000)`.
+
 The byte count is an upper bound (clustered tables can scan less). The
 dollar figure is only bytes x `price_per_tib_usd`: it ignores the
 monthly free tier, regional price differences, and doesn't apply if you
