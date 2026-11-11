@@ -103,6 +103,15 @@ class DataProfiler:
             df, column_profiles, min_purity=st.dependency_min_purity, min_support_rows=st.dependency_min_support_rows,
             max_candidate_pool=st.max_dependency_candidates,
         ) if st.column_dependencies else []
+        # The rows that break a dependency are raw values: mask them for
+        # columns flagged as personal data, like every other value listed.
+        sensitive_names = {c["name"] for c in column_profiles if c["sensitive"]["is_sensitive"]}
+        for dep in column_dependencies:
+            for ex in dep["violation_examples"]:
+                if dep["determinant"] in sensitive_names:
+                    ex["determinant_value"] = mask_value(ex["determinant_value"])
+                if dep["dependent"] in sensitive_names:
+                    ex["dependent_value"] = mask_value(ex["dependent_value"])
         referential_integrity, reference_suggestions = find_referential_integrity(
             df, column_profiles, references, st, mode=st.suggested_reference_mode(PANDAS))
 

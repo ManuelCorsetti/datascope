@@ -489,7 +489,7 @@ details.settings summary { cursor: pointer; font-family: var(--font-mono); font-
   <div id="detail-content"></div>
 </main>
 
-<footer class="footer"><span class="material-symbols-outlined icon icon-sm" style="vertical-align:-2px">lock</span> Values in columns that look like personal or sensitive data are masked throughout. Type and quality-rule suggestions are heuristic &mdash; verify before enforcing.</footer>
+<footer class="footer"><span class="material-symbols-outlined icon icon-sm" style="vertical-align:-2px">lock</span> Values from columns that look like personal or sensitive data are masked wherever the report lists them. Type and quality-rule suggestions are heuristic &mdash; verify before enforcing.</footer>
 
 <script>
 const PROFILE = __PROFILE_DATA_JSON__;
@@ -900,7 +900,7 @@ function renderSensitive() {
   let html = '<p class="sens-intro">datascope checks every column\u2019s <b>name</b>' +
     (bq ? '' : ' and a <b>sample of its values</b>') + ' for <b>personal data</b> (PII: names, email addresses, phone numbers, ' +
     'postal addresses, ID numbers, dates of birth), <b>health data</b> (PHI: medical records, diagnoses, medication) and ' +
-    '<b>payment data</b> (PCI: card and bank account numbers). Values in flagged columns are <b>masked everywhere in this report</b>. ' +
+    '<b>payment data</b> (PCI: card and bank account numbers). Values from flagged columns are <b>masked wherever this report lists them</b> (top values and examples); summary statistics such as a date range are still shown. ' +
     'This is pattern matching to point you at columns worth a review, not a compliance decision.' +
     (bq ? ' On BigQuery only column names are checked: checking values would mean pulling them out of the warehouse.' : '') + '</p>';
   if (!cols.length) {
