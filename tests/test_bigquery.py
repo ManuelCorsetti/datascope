@@ -220,12 +220,14 @@ class TestProfileShape:
         assert result["high_correlation_pairs"] == [{"col1": "order_id", "col2": "amount", "correlation": 0.912}]
         assert any("highly correlated" in a["message"] for a in result["overview"]["alerts"])
 
-    def test_correlations_can_be_turned_off_or_capped(self, canned):
-        assert "CORR(" not in BigQueryProfiler(client=canned, max_correlation_cols=0).build_sql("proj.sales.orders")[0]
-        # one numeric column left -> nothing to pair it with
-        assert "CORR(" not in BigQueryProfiler(client=canned, max_correlation_cols=1).build_sql("proj.sales.orders")[0]
-        result = BigQueryProfiler(client=canned, max_correlation_cols=0).profile(table="proj.sales.orders")
+    def test_correlations_can_be_turned_off(self, canned):
+        assert "CORR(" not in BigQueryProfiler(client=canned, correlations=False).build_sql("proj.sales.orders")[0]
+        result = BigQueryProfiler(client=canned, correlations=False).profile(table="proj.sales.orders")
         assert result["correlations"] is None and result["high_correlation_pairs"] == []
+        corr = next(c for c in result["meta"]["checks"] if c["id"] == "correlations")
+        assert corr["status"] == "skipped" and corr["flags"] == ["--correlations"]
+        with pytest.raises(ValueError, match="max_correlation_cols"):
+            BigQueryProfiler(client=canned, max_correlation_cols=1)  # can't correlate one column
 
     def test_declared_references_are_planned_and_validated(self, canned):
         canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
@@ -243,16 +245,21 @@ class TestProfileShape:
                                                         references={"customer_email": "order_id"})[1]
         assert "CAST(`customer_email` AS STRING)" in sql
 
-    def test_suggestions_are_estimated_but_only_run_when_parent_is_a_key(self, canned, dry_run_config):
+    def test_suggestions_are_listed_by_default_and_planned_only_when_checked(self, canned, dry_run_config):
         canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
-        profiler = BigQueryProfiler(client=canned)
+        # default ("auto" = list on BigQuery): nothing planned beyond profiling
+        assert len(BigQueryProfiler(client=canned).build_sql("proj.sales.orders")) == 1
+        est = BigQueryProfiler(client=canned).estimate(table="proj.sales.orders")
+        assert est["sections"][-1]["section"] == "suggested references" and est["sections"][-1]["bytes_processed"] == 0
+        # "check": name-matched pairs are planned (an upper bound) ...
+        profiler = BigQueryProfiler(client=canned, suggested_references="check")
         planned = profiler.build_sql("proj.sales.orders")
         assert len(planned) == 2 and "`parent_order_id` AS v" in planned[1]
-        assert profiler.estimate(table="proj.sales.orders")["queries"] == 2
-        # canned row has no stats for parent_order_id -> not a plausible child, nothing extra runs
+        assert profiler.estimate(table="proj.sales.orders")["sections"][-1]["note"].startswith("Upper bound")
+        # ... but canned row has no stats for parent_order_id -> not a plausible child, nothing extra runs
         result = profiler.profile(table="proj.sales.orders")
         assert len(result["meta"]["sql"]) == 1 and result["referential_integrity"] == []
-        assert BigQueryProfiler(client=canned, max_reference_suggestions=0).build_sql("proj.sales.orders") == planned[:1]
+        assert BigQueryProfiler(client=canned, suggested_references="off").build_sql("proj.sales.orders") == planned[:1]
 
     def test_wide_tables_are_split_into_batches(self, canned):
         result = BigQueryProfiler(client=canned, max_columns_per_query=2).profile(table="proj.sales.orders")
@@ -331,11 +338,36 @@ class TestEstimate:
     def test_estimate_dry_runs_every_batch_and_runs_nothing(self, canned, dry_run_config):
         est = BigQueryProfiler(client=canned, max_columns_per_query=2).estimate(table="proj.sales.orders")
         assert canned.queries == []
-        assert canned.dry_runs == est["sql"] and est["queries"] == 2
+        # every query dry-run, plus the first one without CORR() to price correlations
+        assert set(est["sql"]) < set(canned.dry_runs) and len(canned.dry_runs) == 3 and est["queries"] == 2
         assert est["bytes_processed"] == 1024 ** 4
         assert est["bytes_processed_human"] == "1.00 TB"
         assert est["estimated_cost_usd"] == 6.25
         assert estimate_bigquery_cost("proj.sales.orders", client=canned, price_per_tib_usd=5)["estimated_cost_usd"] == 2.5
+
+    def test_estimate_is_split_by_section(self, canned, dry_run_config):
+        # A client whose dry runs bill 1 GiB per distinct column referenced.
+        def dry_bytes(sql):
+            import re
+            return len(set(re.findall(r"`(\w+)`", sql)) - {"proj.sales.orders"}) * 1024 ** 3
+        orig = canned.query
+        def query(sql, job_config=None, **kw):
+            job = orig(sql, job_config=job_config, **kw)
+            if getattr(job_config, "dry_run", False):
+                job.total_bytes_processed = dry_bytes(sql)
+            return job
+        canned.query = query
+        canned.schema.append(Field("parent_order_id", "INT64", "NULLABLE"))
+        est = BigQueryProfiler(client=canned, max_columns_per_query=2, suggested_references="check").estimate(
+            table="proj.sales.orders", references={"amount": "order_id"})
+        by = {s["section"]: s for s in est["sections"]}
+        # batch 1 reads order_id + customer_email, batch 2 amount + parent_order_id;
+        # CORR() makes batch 1 also read amount and parent_order_id: 2 GiB extra
+        assert by["profiling"]["bytes_processed"] == 4 * 1024 ** 3 and by["profiling"]["queries"] == 2
+        assert by["correlations"]["bytes_processed"] == 2 * 1024 ** 3
+        assert by["reference amount -> order_id (declared)"]["bytes_processed"] == 2 * 1024 ** 3
+        assert by["reference parent_order_id -> order_id (suggested)"]["note"].startswith("Upper bound")
+        assert est["bytes_processed"] == sum(s["bytes_processed"] for s in est["sections"])
 
     def test_estimate_refuses_to_run_for_real_when_dry_run_unavailable(self, canned, monkeypatch):
         monkeypatch.setattr(BigQueryProfiler, "_job_config", lambda self, dry_run=False: None)
@@ -497,7 +529,7 @@ class TestExecutedAgainstRealData:
         client.load("ri_customers", customers)
         client.load("ri_orders", orders)
 
-        got = profile_bigquery("demo.shop.ri_orders", client=client, output_html=None,
+        got = profile_bigquery("demo.shop.ri_orders", client=client, output_html=None, suggested_references="check",
                                references={"customer_id": "demo.shop.ri_customers.id", "sku": "order_id"})
         want = DataProfiler().profile(orders, references={
             "customer_id": ("demo.shop.ri_customers.id", customers["id"]), "sku": "order_id"})
@@ -511,6 +543,24 @@ class TestExecutedAgainstRealData:
         assert {r["column"]: r["sample_orphans"] for r in got["referential_integrity"]} == \
                {r["column"]: r["sample_orphans"] for r in want["referential_integrity"]}
         assert sum("_datascope_ref" in q for q in got["meta"]["sql"]) == 3
+
+    def test_suggestions_are_listed_with_their_cost_by_default(self, warehouse, dry_run_config):
+        client, _ = warehouse
+        n = 120
+        df = pd.DataFrame({"order_id": np.arange(1, n + 1),
+                           "parent_order_id": pd.array(np.r_[np.arange(1, 31).repeat(2), [None] * 60], dtype="Int64")})
+        client.load("ri_listed", df)
+        before = len(client.queries)
+        result = profile_bigquery("demo.shop.ri_listed", client=client, output_html=None)
+        assert len(client.queries) - before == 1  # only the profiling query ran
+        assert result["referential_integrity"] == []
+        [sg] = result["reference_suggestions"]
+        assert (sg["column"], sg["references"], sg["status"]) == ("parent_order_id", "order_id", "listed")
+        assert sg["estimated_bytes"] == 5 * 1024 * 1024  # the stand-in's dry-run figure
+        check = next(c for c in result["meta"]["checks"] if c["id"] == "ri_suggested")
+        assert check["status"] == "listed" and "5.00 MB" in check["detail"]
+        assert result["meta"]["extend_command"]["text"] == \
+            "datascope --bq-table demo.shop.ri_listed --suggested-references check"
 
     def test_query_profile_covers_every_result_column(self, warehouse):
         client, df = warehouse

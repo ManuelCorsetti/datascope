@@ -20,36 +20,33 @@ from .semantic import infer_semantic_type
 from .pii import detect_sensitive_data, mask_value
 from .quality import recommend_rules, generate_dbt_snippet
 from .referential import Reference, alerts_for, find_referential_integrity
-from .relationships import find_functional_dependencies
+from .relationships import _candidate_pool, find_functional_dependencies
+from .run_summary import finish as finish_run_summary, pandas_checks
+from .settings import PANDAS, Settings, resolve
 from .html_report import render_html
 
 DATETIME_TYPES = ("datetime", "datetime_string")
 
 
 class DataProfiler:
-    def __init__(
-        self,
-        sample_size_for_content_checks: int = 1000,
-        histogram_bins: int = 30,
-        top_n_values: int = 10,
-        max_pk_combo_size: int = 3,
-        max_pk_candidate_pool: int = 10,
-        max_correlation_cols: int = 30,
-        random_state: int = 42,
-        fd_min_purity: float = 0.98,
-        max_fd_candidate_pool: int = 25,
-        suggest_references: bool = True,
-    ):
-        self.sample_size_for_content_checks = sample_size_for_content_checks
-        self.histogram_bins = histogram_bins
-        self.top_n_values = top_n_values
-        self.max_pk_combo_size = max_pk_combo_size
-        self.max_pk_candidate_pool = max_pk_candidate_pool
-        self.max_correlation_cols = max_correlation_cols
-        self.random_state = random_state
-        self.fd_min_purity = fd_min_purity
-        self.max_fd_candidate_pool = max_fd_candidate_pool
-        self.suggest_references = suggest_references
+    """Profile a DataFrame (or a csv/tsv/parquet/xlsx/json path).
+
+    Every threshold and limit is a `Settings` field: pass `settings=`, or
+    any field as a keyword (`DataProfiler(max_correlation_cols=50)`).
+    `suggest_references=False` is still accepted (same as
+    `suggested_references="off"`). The values used are recorded in
+    `result["meta"]["settings"]`.
+    """
+
+    def __init__(self, settings: Optional[Settings] = None, **kwargs: Any):
+        self.settings = resolve(settings, kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        # Old attribute names (profiler.max_correlation_cols) read through.
+        settings = self.__dict__.get("settings")
+        if settings is not None and name in Settings.__dataclass_fields__:
+            return getattr(settings, name)
+        raise AttributeError(name)
 
     # ---------------------------------------------------------------- load
     def _load(self, data: Union[pd.DataFrame, str]) -> pd.DataFrame:
@@ -80,12 +77,14 @@ class DataProfiler:
         table (its name), another table's key column (a Series), or
         (label, Series) to name it in the report, e.g.
         {"customer_id": ("customers.id", customers["id"])}. Likely
-        same-table references are also suggested unless the profiler was
-        built with suggest_references=False.
+        same-table references are also suggested (see the
+        `suggested_references` setting).
         """
+        st = self.settings
         df = self._load(data)
         n_rows = len(df)
         n_cols = len(df.columns)
+        given_name = source_name
         source_name = source_name or (data if isinstance(data, str) else "dataset")
 
         duplicate_rows = int(df.duplicated().sum()) if n_rows else 0
@@ -103,16 +102,17 @@ class DataProfiler:
         sensitive_cols = [c for c in column_profiles if c["sensitive"]["is_sensitive"]]
 
         numeric_cols = [c["name"] for c in column_profiles if c.get("numeric_stats")]
-        correlations = self._numeric_correlation(df, numeric_cols)
-        missing_correlation = self._missing_correlation(df)
+        correlations = self._numeric_correlation(df, numeric_cols) if st.correlations else None
+        missing_correlation = self._missing_correlation(df) if st.correlations else None
         pk_candidates = self._find_pk_candidates(df, column_profiles)
         high_correlation_pairs = self._high_correlation_pairs(correlations)
-        duplicate_columns = self._find_duplicate_columns(df)
+        duplicate_columns = self._find_duplicate_columns(df, max_cols=st.max_duplicate_column_check)
         functional_dependencies = find_functional_dependencies(
-            df, column_profiles, min_purity=self.fd_min_purity, max_candidate_pool=self.max_fd_candidate_pool,
-        )
-        referential_integrity = find_referential_integrity(df, column_profiles, references,
-                                                           suggest=self.suggest_references)
+            df, column_profiles, min_purity=st.fd_min_purity, min_support_rows=st.fd_min_support_rows,
+            max_candidate_pool=st.max_fd_candidate_pool,
+        ) if st.functional_dependencies else []
+        referential_integrity, reference_suggestions = find_referential_integrity(
+            df, column_profiles, references, st, mode=st.suggested_reference_mode(PANDAS))
 
         meta = {
             "source_name": str(source_name),
@@ -122,6 +122,7 @@ class DataProfiler:
             "memory_mb": round(memory_bytes / (1024 * 1024), 3),
             "duplicate_rows": duplicate_rows,
             "duplicate_rows_pct": round(100 * duplicate_rows / n_rows, 3) if n_rows else 0.0,
+            "engine": PANDAS,
         }
 
         overview = {
@@ -142,10 +143,30 @@ class DataProfiler:
             "duplicate_columns": duplicate_columns,
             "functional_dependencies": functional_dependencies,
             "referential_integrity": referential_integrity,
+            "reference_suggestions": reference_suggestions,
         }
         result["overview"]["alerts"] = self._build_alerts(column_profiles, duplicate_rows, n_rows,
                                                             high_correlation_pairs, duplicate_columns,
-                                                            functional_dependencies) + alerts_for(referential_integrity)
+                                                            functional_dependencies) + alerts_for(referential_integrity, st)
+
+        pk_eligible = [c for c in column_profiles if c["missing"] == 0 and c["unique"] > 1]
+        checks = pandas_checks(st, {
+            "n_cols": n_cols, "n_rows": n_rows, "duplicate_rows": duplicate_rows,
+            "max_non_null": max((c["count"] - c["missing"] for c in column_profiles), default=0),
+            "n_numeric": len(numeric_cols),
+            "n_missing_corr_cols": sum(1 for c in column_profiles if 0 < c["missing"] < n_rows),
+            "pk": {"single_found": any(p["type"] == "single" for p in pk_candidates),
+                   "composite_found": any(p["type"] == "composite" for p in pk_candidates),
+                   "eligible": len(pk_eligible)},
+            "fd_pool_eligible": len(_candidate_pool(column_profiles, max_pool=10 ** 9)),
+            "declared": len(references or {}),
+            "suggestions": reference_suggestions,
+        })
+        finish_run_summary(meta, st, checks, {
+            "source": data if isinstance(data, str) else None,
+            "source_name": given_name,
+            "references": [_reference_arg(child, ref) for child, ref in (references or {}).items()],
+        }, PANDAS, _version())
         return result
 
     # -------------------------------------------------------- per column
@@ -258,12 +279,14 @@ class DataProfiler:
                     return candidates
         return candidates
 
-    def _high_correlation_pairs(self, correlations: Optional[Dict[str, Any]], threshold: float = 0.8) -> List[Dict[str, Any]]:
+    def _high_correlation_pairs(self, correlations: Optional[Dict[str, Any]],
+                                threshold: Optional[float] = None) -> List[Dict[str, Any]]:
         """Numeric column pairs that move together strongly enough to be
         worth a second look — possible redundancy, a derived column, or
         two columns that should collapse into one."""
         if not correlations:
             return []
+        threshold = self.settings.high_correlation_threshold if threshold is None else threshold
         cols = correlations["columns"]
         matrix = correlations["matrix"]
         pairs = []
@@ -295,6 +318,7 @@ class DataProfiler:
                        high_correlation_pairs: Optional[List[Dict[str, Any]]] = None,
                        duplicate_columns: Optional[List[List[str]]] = None,
                        functional_dependencies: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+        st = self.settings
         alerts: List[Dict[str, Any]] = []
         if duplicate_rows > 0:
             alerts.append({
@@ -321,10 +345,10 @@ class DataProfiler:
             if c["semantic_type"] == "constant":
                 alerts.append({"severity": "warning", "column": c["name"],
                                 "message": "Single distinct value — consider dropping."})
-            if c["missing_pct"] > 50:
+            if c["missing_pct"] > st.missing_high_pct:
                 alerts.append({"severity": "high", "column": c["name"],
                                 "message": f"{c['missing_pct']}% missing values."})
-            elif c["missing_pct"] > 20:
+            elif c["missing_pct"] > st.missing_warning_pct:
                 alerts.append({"severity": "warning", "column": c["name"],
                                 "message": f"{c['missing_pct']}% missing values."})
             if c["semantic_type"] == "high_cardinality_text":
@@ -333,11 +357,11 @@ class DataProfiler:
             if c["semantic_type"] == "datetime_string":
                 alerts.append({"severity": "info", "column": c["name"],
                                 "message": "Dates stored as text — consider casting to a real datetime type."})
-            if c["sensitive"]["is_sensitive"] and c["sensitive"]["confidence"] >= 0.7:
+            if c["sensitive"]["is_sensitive"] and c["sensitive"]["confidence"] >= st.sensitive_alert_min_confidence:
                 alerts.append({"severity": "sensitive", "column": c["name"],
                                 "message": f"Likely {c['sensitive']['category']} ({c['sensitive']['type']}) — review access controls."})
             ns = c.get("numeric_stats")
-            if ns and ns.get("outlier_pct", 0) > 5:
+            if ns and ns.get("outlier_pct", 0) > st.outlier_alert_pct:
                 alerts.append({"severity": "info", "column": c["name"],
                                 "message": f"{ns['outlier_pct']}% statistical outliers (1.5x IQR)."})
             if ns and ns.get("infinite_count", 0) > 0:
@@ -371,3 +395,18 @@ def profile(
         import webbrowser
         webbrowser.open(f"file://{os.path.abspath(output_html)}")
     return result
+
+
+def _version() -> str:
+    from . import __version__
+    return __version__
+
+
+def _reference_arg(child: str, ref: Any) -> Optional[str]:
+    """CHILD=PARENT for the reproduce command; None when a reference was a
+    bare Series the CLI can't name (the command marks it as a placeholder)."""
+    if isinstance(ref, str):
+        return f"{child}={ref}"
+    if isinstance(ref, tuple) and ":" in str(ref[0]):
+        return f"{child}={ref[0]}"  # the CLI's own PATH:COLUMN label
+    return f"{child}=PATH:COLUMN"

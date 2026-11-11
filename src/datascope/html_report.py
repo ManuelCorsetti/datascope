@@ -38,9 +38,19 @@ def render_html(profile: dict, output_path: str) -> None:
     sanitized = _sanitize(profile)
     json_str = json.dumps(sanitized, default=str)
     json_str_safe = json_str.replace("</", "<\\/")  # don't let data content break out of <script>
-    html = _TEMPLATE.replace("__PROFILE_DATA_JSON__", json_str_safe)
+    html = (_TEMPLATE.replace("__PROFILE_DATA_JSON__", json_str_safe)
+            .replace("__SETTINGS_DOC_JSON__", json.dumps(_settings_doc()).replace("</", "<\\/")))
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
+
+
+def _settings_doc() -> list:
+    """Every setting's flag, default, help and engines, so the report
+    documents the parameters it was run with."""
+    from .settings import GROUPS, flag_name, iter_fields
+    titles = dict(GROUPS)
+    return [{"name": f.name, "flag": flag_name(f.name), "default": f.default, "help": m["help"].replace("%%", "%"),
+             "group": titles[m["group"]], "engines": m["engines"]} for f, m in iter_fields()]
 
 
 _TEMPLATE = r'''<!DOCTYPE html>
@@ -226,6 +236,46 @@ table.heatmap th { padding: 4px 6px; }
   color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
 .ri-detail { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
 .ri-detail code { font-family: var(--font-mono); color: var(--text); }
+.run-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -6px 0 22px; padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: var(--radius-sm); font-size: 13px; }
+.run-strip a { color: var(--teal); font-weight: 500; text-decoration: none; }
+.run-strip a:hover { text-decoration: underline; }
+#run-section { scroll-margin-top: 76px; }
+.run-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.run-table td { padding: 8px 10px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.run-table tr:first-child td { border-top: none; }
+.run-name { font-weight: 500; white-space: nowrap; }
+.run-detail { color: var(--text-muted); }
+.run-flags code, .set-flag { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; color: var(--text); white-space: nowrap; }
+.run-hint { color: var(--text-faint); font-size: 12px; }
+.run-hint, .set-help, .ri-detail { font-variant-ligatures: none; }
+.run-status { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px;
+  border-radius: 4px; white-space: nowrap; color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
+.run-cmd { margin-top: 18px; }
+.run-cmd-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px;
+  font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.run-cmd .code-block { white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-cmd-note { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+details.settings { margin-top: 18px; }
+details.settings summary { cursor: pointer; font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.set-group { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); padding-top: 14px !important; }
+.set-row td { padding: 6px 10px 6px 0; border-top: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+.set-val { font-family: var(--font-mono); white-space: nowrap; }
+.set-changed .set-val { color: var(--teal); font-weight: 600; }
+.set-help { color: var(--text-muted); }
+.set-engine { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+@media (max-width: 640px) {
+  .run-table, .run-table tbody, .run-table tr, .run-table td { display: block; }
+  .run-table tr { border-top: 1px solid var(--border); padding: 8px 0; }
+  .run-table tr:first-child { border-top: none; }
+  .run-table td, .set-row td { border-top: none; padding: 2px 0; }
+  .run-name { white-space: normal; }
+  .run-flags code, .set-flag { white-space: normal; overflow-wrap: anywhere; }
+  .set-engine, .set-default { display: none; }
+  .topbar-meta { flex-wrap: wrap; min-width: 0; }
+  #source-name { overflow-wrap: anywhere; }
+}
 .columns-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .columns-title { font-family: var(--font-mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-muted); font-weight: 600; }
 .column-count { font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); }
@@ -346,6 +396,7 @@ table.heatmap th { padding: 4px 6px; }
 <main id="view-dashboard" class="view">
   <section class="kpi-grid" id="kpi-grid">
   </section>
+  <div class="run-strip" id="run-strip" hidden></div>
 
   <section class="panel" id="dq-section">
     <div class="panel-title"><span class="material-symbols-outlined icon">fact_check</span>Data quality</div>
@@ -406,6 +457,11 @@ table.heatmap th { padding: 4px 6px; }
       </select>
     </div>
     <div id="column-grid" class="column-grid"></div>
+  </section>
+
+  <section class="panel" id="run-section" hidden>
+    <div class="panel-title"><span class="material-symbols-outlined icon">fact_check</span>Run summary <span class="panel-sub">what was checked, what wasn't, and how to repeat or extend this run</span></div>
+    <div id="run-body"></div>
   </section>
 </main>
 
@@ -744,11 +800,28 @@ function renderReferentialIntegrity() {
   const list = document.getElementById('ri-list');
   const checks = (PROFILE.referential_integrity || []).slice()
     .sort((a,b) => (b.orphans > 0) - (a.orphans > 0) || (a.source === 'declared' ? -1 : 1) - (b.source === 'declared' ? -1 : 1));
-  if (!checks.length) { panel.style.display = 'none'; return; }
+  const suggestions = PROFILE.reference_suggestions || [];
+  const listed = suggestions.filter(s => s.status === 'listed');
+  const overLimit = suggestions.filter(s => s.status === 'over_limit').length;
+  if (!checks.length && !listed.length && !overLimit) { panel.style.display = 'none'; return; }
   panel.style.display = '';
+  const highPct = setting('ri_high_orphan_pct', 5);
+  const listedHtml = listed.map(sg =>
+    '<div class="ri-row">' +
+      '<div class="ri-head">' +
+        '<span class="ri-expr"><button type="button" class="alert-col-link" data-open-col="' + esc(sg.column) + '" title="Open column details">' + esc(sg.column) + '</button> <span class="fd-arrow">\u2192</span> <b>' + esc(sg.references) + '</b></span>' +
+        '<span class="ri-tag">suggested</span><span class="ri-tag">same table</span>' +
+        '<span class="ri-status" style="--sev-color:var(--text-muted);--sev-bg:var(--surface-2)">' + icon('schedule', 'sm') + 'not checked</span>' +
+      '</div>' +
+      '<div class="ri-detail">Looks like a reference from its name and data, but checking it is an extra query' +
+        (sg.estimated_bytes !== null && sg.estimated_bytes !== undefined ? ' (about ' + fmtBytes(sg.estimated_bytes) + ' scanned)' : '') +
+        '. Rerun with <code>--suggested-references check</code>.</div>' +
+    '</div>').join('') +
+    (overLimit ? '<div class="ri-row"><div class="ri-detail">' + overLimit + ' more possible reference' + (overLimit === 1 ? '' : 's') +
+      ' over the limit \u2014 raise <code>--max-reference-suggestions</code> (see the run summary).</div></div>' : '');
   list.innerHTML = checks.map(r => {
     const bad = r.orphans > 0;
-    const sev = !bad ? 'var(--green)' : (r.source === 'declared' && r.orphan_pct > 5 ? 'var(--coral)' : 'var(--amber)');
+    const sev = !bad ? 'var(--green)' : (r.source === 'declared' && r.orphan_pct > highPct ? 'var(--coral)' : 'var(--amber)');
     const status = bad
       ? icon('link_off', 'sm') + fmtInt(r.orphans) + ' orphan row' + (r.orphans === 1 ? '' : 's') + ' \u00b7 ' + fmtPct(r.orphan_pct, r.orphan_pct < 0.1 ? 3 : 1)
       : icon('check', 'sm') + 'all matched';
@@ -768,9 +841,89 @@ function renderReferentialIntegrity() {
       '</div>' +
       '<div class="ri-detail">' + detail + (r.compared_as === 'text' ? ' <span class="panel-sub">(compared as text: the two columns have different types)</span>' : '') + '</div>' +
     '</div>';
-  }).join('');
+  }).join('') + listedHtml;
   list.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
   wireTooltips(list);
+}
+
+const SETTINGS_DOC = __SETTINGS_DOC_JSON__;
+function setting(name, fallback) {
+  const s = PROFILE.meta && PROFILE.meta.settings;
+  return s && s[name] !== undefined ? s[name] : fallback;
+}
+
+const RUN_STATUS = {
+  ran:              {label: 'ran',            icon: 'check_circle', color: 'var(--green)'},
+  nothing_to_check: {label: 'nothing to do',  icon: 'check_circle', color: 'var(--text-muted)'},
+  partial:          {label: 'partial',        icon: 'contrast',     color: 'var(--amber)'},
+  skipped:          {label: 'skipped',        icon: 'block',        color: 'var(--amber)'},
+  listed:           {label: 'listed',         icon: 'schedule',     color: 'var(--amber)'},
+  not_configured:   {label: 'not set up',     icon: 'add_circle',   color: 'var(--text-muted)'},
+  not_available:    {label: 'not available',  icon: 'do_not_disturb_on', color: 'var(--text-faint)'},
+};
+const EXTENDABLE = ['partial', 'skipped', 'listed'];
+
+function fmtSetting(v) { return typeof v === 'boolean' ? (v ? 'on' : 'off') : String(v); }
+
+function cmdBlock(title, cmd, note) {
+  return '<div class="run-cmd copy-scope"><div class="run-cmd-head"><span>' + esc(title) + '</span>' +
+    '<button class="copy-btn" data-copy>' + icon('content_copy','sm') + 'Copy</button></div>' +
+    '<pre class="code-block"><code>' + esc(cmd.text) + '</code></pre>' +
+    (note ? '<div class="run-cmd-note">' + note + '</div>' : '') + '</div>';
+}
+
+function renderRunSummary() {
+  const meta = PROFILE.meta || {};
+  const checks = meta.checks;
+  if (!checks || !checks.length) return;  // a profile from an older datascope
+  const extendable = checks.filter(c => EXTENDABLE.indexOf(c.status) !== -1);
+  const strip = document.getElementById('run-strip');
+  if (extendable.length) {
+    strip.hidden = false;
+    strip.innerHTML = icon('info', 'sm', 'color:var(--amber)') + '<span>' + extendable.length + ' check' + (extendable.length === 1 ? ' was' : 's were') +
+      ' capped, skipped or only listed in this run: ' + extendable.map(c => esc(c.name)).join(', ') + '.</span>' +
+      '<a href="#run-section" id="run-strip-link">See how to extend it \u2193</a>';
+    document.getElementById('run-strip-link').addEventListener('click', e => { e.preventDefault(); jumpTo('run-section'); });
+  }
+
+  const rows = checks.map(c => {
+    const st = RUN_STATUS[c.status] || RUN_STATUS.ran;
+    const action = (EXTENDABLE.indexOf(c.status) !== -1 && c.flags.length)
+      ? '<span class="run-flags">' + '<code>' + esc(c.flags.join(' ')) + '</code></span>'
+      : (c.hint ? '<span class="run-hint">' + esc(c.hint) + '</span>' : '');
+    return '<tr><td><span class="run-status" style="--sev-color:' + st.color + ';--sev-bg:' + softBg(st.color) + '">' + icon(st.icon, 'sm') + st.label + '</span></td>' +
+      '<td class="run-name">' + esc(c.name) + '</td>' +
+      '<td class="run-detail-cell"><div class="run-detail">' + esc(c.detail) + '</div>' + (action ? '<div style="margin-top:4px">' + action + '</div>' : '') + '</td></tr>';
+  }).join('');
+
+  let html = '<table class="run-table"><tbody>' + rows + '</tbody></table>';
+  const placeholderNote = 'Replace <code>INPUT</code>/<code>PATH:COLUMN</code>: this run was started from Python, so the data had no file name.';
+  if (meta.extend_command) html += cmdBlock('Extend this run', meta.extend_command, (meta.extend_command.complete ? '' : placeholderNote));
+  if (meta.command) html += cmdBlock('Reproduce this run', meta.command, (meta.command.complete ? '' : placeholderNote));
+
+  const used = meta.settings || {};
+  const engine = meta.engine;
+  const changed = SETTINGS_DOC.filter(d => used[d.name] !== undefined && used[d.name] !== d.default).length;
+  let group = null, setRows = '';
+  SETTINGS_DOC.forEach(d => {
+    if (d.group !== group) { group = d.group; setRows += '<tr><td colspan="4" class="set-group">' + esc(group) + '</td></tr>'; }
+    const v = used[d.name];
+    const isChanged = v !== undefined && v !== d.default;
+    const applies = d.engines === 'both' || d.engines === engine;
+    setRows += '<tr class="set-row' + (isChanged ? ' set-changed' : '') + '"' + (applies ? '' : ' style="opacity:.55"') + '>' +
+      '<td><span class="set-flag">' + esc(d.flag) + '</span></td>' +
+      '<td class="set-val">' + esc(v === undefined ? '\u2014' : fmtSetting(v)) + (isChanged ? ' <span class="set-default panel-sub">(default ' + esc(fmtSetting(d.default)) + ')</span>' : '') + '</td>' +
+      '<td class="set-help">' + esc(d.help) + '</td>' +
+      '<td class="set-engine">' + (d.engines === 'both' ? '' : esc(d.engines) + ' only') + '</td></tr>';
+  });
+  html += '<details class="settings"><summary>All settings \u2014 ' + (changed ? changed + ' changed from default' : 'all defaults') +
+    (meta.datascope_version ? ' \u00b7 datascope ' + esc(meta.datascope_version) : '') + '</summary>' +
+    '<table class="run-table" style="margin-top:8px"><tbody>' + setRows + '</tbody></table></details>';
+
+  const body = document.getElementById('run-body');
+  body.innerHTML = html;
+  document.getElementById('run-section').hidden = false;
+  wireCopyButtons(body);
 }
 
 const state = { search: '', sensitiveOnly: false, typeFilters: new Set(), sort: 'name' };
@@ -885,7 +1038,7 @@ function renderDbtBlock(snippet) {
 function wireCopyButtons(root) {
   root.querySelectorAll('[data-copy]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const code = btn.closest('.dbt-block').querySelector('code');
+      const code = btn.closest('.dbt-block, .copy-scope').querySelector('code');
       const text = code.textContent;
       const done = () => { const orig = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = orig, 1200); };
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => {});
@@ -956,6 +1109,7 @@ renderMissingCorr();
 renderPkCandidates();
 renderFunctionalDependencies();
 renderReferentialIntegrity();
+renderRunSummary();
 renderFilterChips();
 renderColumnGrid();
 </script>

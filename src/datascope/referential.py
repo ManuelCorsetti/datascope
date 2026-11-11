@@ -15,8 +15,10 @@ Two ways a check comes about:
   name rule is deliberate: surrogate integer keys (1..N) are trivially
   "contained" in each other, so value overlap alone would flag
   `quantity -> customer_id`. A suggestion is only reported when at least
-  90% of its rows match; a lower rate means it probably isn't a
-  reference at all, not that the data is broken.
+  `ri_suggest_min_match_pct` of its rows match; a lower rate means it
+  probably isn't a reference at all, not that the data is broken.
+
+Every threshold here comes from `Settings` (the `ri_*` fields).
 
 NULL child values are not orphans (a missing reference is a
 completeness question, reported elsewhere), matching SQL foreign keys.
@@ -29,12 +31,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import pandas as pd
 
 from .pii import mask_value
-
-SAMPLE_ORPHANS = 5
-SUGGEST_MAX_ORPHAN_PCT = 10.0
-SUGGEST_MIN_ROWS = 10
-SUGGEST_MIN_DISTINCT = 3
-PARENT_MIN_UNIQUE_PCT = 99.0
+from .settings import Settings
 
 _KEY_SUFFIX_RE = re.compile(r"(?:^|_)(?:id|key|ref|code|no|num|number)$", re.IGNORECASE)
 _CAMEL_KEY_SUFFIX_RE = re.compile(r"(?<=[a-z0-9])(?:Id|ID|Key|Ref|Code|No)$")
@@ -65,39 +62,40 @@ def name_suggests_reference(child: str, parent: str) -> bool:
     return stem in child.lower() and key_stem(child) != stem
 
 
-def is_parent_candidate(col: Dict[str, Any]) -> bool:
+def is_parent_candidate(col: Dict[str, Any], s: Settings) -> bool:
     """An identifier column unique enough to be a key. Duplicate rows can
-    knock a real key slightly under 100%, hence the 99% bar."""
+    knock a real key slightly under 100%, hence ri_parent_min_unique_pct."""
     non_null = col.get("count", 0) - col.get("missing", 0)
     return (col.get("semantic_type") == "identifier" and col.get("missing", 1) == 0 and non_null > 0
-            and col.get("unique", 0) / non_null * 100 >= PARENT_MIN_UNIQUE_PCT
+            and col.get("unique", 0) / non_null * 100 >= s.ri_parent_min_unique_pct
             and not (col.get("numeric_stats") and not col["numeric_stats"].get("is_integer_like")))
 
 
-def is_child_candidate(col: Dict[str, Any]) -> bool:
+def is_child_candidate(col: Dict[str, Any], s: Settings) -> bool:
     non_null = col.get("count", 0) - col.get("missing", 0)
-    if non_null < SUGGEST_MIN_ROWS or col.get("unique", 0) < SUGGEST_MIN_DISTINCT:
+    if non_null < s.ri_suggest_min_rows or col.get("unique", 0) < s.ri_suggest_min_distinct:
         return False
     if col.get("numeric_stats") and not col["numeric_stats"].get("is_integer_like"):
         return False
     # A column that is itself a key is a 1:1 twin, not a reference.
-    return not (col.get("unique", 0) / non_null * 100 >= PARENT_MIN_UNIQUE_PCT)
+    return not (col.get("unique", 0) / non_null * 100 >= s.ri_parent_min_unique_pct)
 
 
-def suggestion_pairs(column_profiles: Sequence[Dict[str, Any]], exclude_children: Iterable[str] = (),
-                     limit: int = 10) -> List[Tuple[str, str]]:
-    """(child, parent) column-name pairs worth checking, from names and
-    the column profiles. Same table only."""
+def suggestion_pairs(column_profiles: Sequence[Dict[str, Any]], s: Settings,
+                     exclude_children: Iterable[str] = ()) -> List[Tuple[str, str]]:
+    """Every (child, parent) column-name pair worth checking, from names
+    and the column profiles. Same table only; the caller applies
+    max_reference_suggestions (so it can report what the cap left out)."""
     exclude = set(exclude_children)
-    parents = [c for c in column_profiles if is_parent_candidate(c)]
+    parents = [c for c in column_profiles if is_parent_candidate(c, s)]
     pairs = []
     for child in column_profiles:
-        if child["name"] in exclude or not is_child_candidate(child):
+        if child["name"] in exclude or not is_child_candidate(child, s):
             continue
         for parent in parents:
             if name_suggests_reference(child["name"], parent["name"]) and _kinds_match(child, parent):
                 pairs.append((child["name"], parent["name"]))
-    return pairs[:limit]
+    return pairs
 
 
 def _kinds_match(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
@@ -106,7 +104,8 @@ def _kinds_match(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
 
 def build_result(column: str, references: str, source: str, same_table: bool, checked: int,
                  orphans: int, orphan_values: int, samples: Sequence[Tuple[Any, int]],
-                 sensitive: bool = False, compared_as: str = "value") -> Dict[str, Any]:
+                 sensitive: bool = False, compared_as: str = "value",
+                 sample_n: int = Settings().ri_sample_orphans) -> Dict[str, Any]:
     show = (lambda v: mask_value(_display(v))) if sensitive else _display
     return {
         "column": column,
@@ -117,7 +116,7 @@ def build_result(column: str, references: str, source: str, same_table: bool, ch
         "orphans": int(orphans),
         "orphan_pct": round(100 * orphans / checked, 3) if checked else 0.0,
         "orphan_values": int(orphan_values),
-        "sample_orphans": [{"value": show(v), "count": int(n)} for v, n in samples[:SAMPLE_ORPHANS]],
+        "sample_orphans": [{"value": show(v), "count": int(n)} for v, n in samples[:sample_n]],
         "compared_as": compared_as,
     }
 
@@ -129,11 +128,16 @@ def _display(v: Any) -> str:
     return str(v)
 
 
-def keep_suggestion(result: Dict[str, Any]) -> bool:
-    return result["checked"] >= SUGGEST_MIN_ROWS and result["orphan_pct"] <= SUGGEST_MAX_ORPHAN_PCT
+def keep_suggestion(result: Dict[str, Any], s: Settings) -> bool:
+    return result["checked"] >= s.ri_suggest_min_rows and 100 - result["orphan_pct"] >= s.ri_suggest_min_match_pct
 
 
-def alerts_for(results: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def suggestion_entry(child: str, parent: str, status: str, estimated_bytes: Optional[int] = None) -> Dict[str, Any]:
+    """A suggested reference that was listed (not checked) or set aside."""
+    return {"column": child, "references": parent, "status": status, "estimated_bytes": estimated_bytes}
+
+
+def alerts_for(results: Sequence[Dict[str, Any]], s: Settings = Settings()) -> List[Dict[str, Any]]:
     """Column-level alerts for checks that found orphans."""
     alerts = []
     for r in results:
@@ -143,7 +147,7 @@ def alerts_for(results: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
         detail = (f"{r['orphans']} row(s) ({round(r['orphan_pct'], 2)}%) point to {r['orphan_values']} value(s) "
                   f"not found in {r['references']}" + (f", e.g. {examples}" if examples else "") + ".")
         if r["source"] == "declared":
-            alerts.append({"severity": "high" if r["orphan_pct"] > 5 else "warning", "column": r["column"],
+            alerts.append({"severity": "high" if r["orphan_pct"] > s.ri_high_orphan_pct else "warning", "column": r["column"],
                            "message": f"Referential integrity: {detail}"})
         else:
             alerts.append({"severity": "warning", "column": r["column"],
@@ -167,7 +171,8 @@ def _as_text(s: pd.Series) -> pd.Series:
 
 
 def check_reference(child: pd.Series, parent: pd.Series, column: str, references: str, source: str,
-                    same_table: bool, sensitive: bool = False) -> Dict[str, Any]:
+                    same_table: bool, sensitive: bool = False,
+                    sample_n: int = Settings().ri_sample_orphans) -> Dict[str, Any]:
     c, p = child.dropna(), parent.dropna()
     compared_as = "value"
     if _is_numeric(c) != _is_numeric(p):
@@ -176,10 +181,10 @@ def check_reference(child: pd.Series, parent: pd.Series, column: str, references
         compared_as = "text"
     orphan_rows = c[~c.isin(pd.unique(p))]
     counts = orphan_rows.value_counts()
-    samples = sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))[:SAMPLE_ORPHANS]
+    samples = sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))[:sample_n]
     return build_result(column, references, source, same_table, checked=len(c), orphans=len(orphan_rows),
                         orphan_values=len(counts), samples=samples, sensitive=sensitive,
-                        compared_as=compared_as)
+                        compared_as=compared_as, sample_n=sample_n)
 
 
 def resolve_declared(df: pd.DataFrame, references: Optional[Dict[str, Reference]]) -> List[Tuple[str, str, pd.Series, bool]]:
@@ -203,16 +208,38 @@ def resolve_declared(df: pd.DataFrame, references: Optional[Dict[str, Reference]
 
 def find_referential_integrity(df: pd.DataFrame, column_profiles: Sequence[Dict[str, Any]],
                                references: Optional[Dict[str, Reference]] = None,
-                               suggest: bool = True) -> List[Dict[str, Any]]:
+                               s: Settings = Settings(), mode: str = "check",
+                               ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """-> (results, suggestions).
+
+    `results` holds every check that ran and is worth reporting: all
+    declared ones, plus suggested ones that matched well enough.
+    `suggestions` accounts for every suggested pair found, whatever
+    happened to it: status "checked" (in results), "below_match" (checked;
+    too few matches to be a reference), "listed" (mode "list": not
+    checked) or "over_limit" (beyond max_reference_suggestions).
+    """
     by_name = {c["name"]: c for c in column_profiles}
     sensitive = {n for n, c in by_name.items() if c["sensitive"]["is_sensitive"]}
     results = [
-        check_reference(df[child], parent, child, label, "declared", same_table, child in sensitive)
+        check_reference(df[child], parent, child, label, "declared", same_table, child in sensitive,
+                        sample_n=s.ri_sample_orphans)
         for child, label, parent, same_table in resolve_declared(df, references)
     ]
-    if suggest:
-        for child, parent in suggestion_pairs(column_profiles, exclude_children=(references or {}).keys()):
-            r = check_reference(df[child], df[parent], child, parent, "suggested", True, child in sensitive)
-            if keep_suggestion(r):
+    suggestions: List[Dict[str, Any]] = []
+    if mode == "off":
+        return results, suggestions
+    pairs = suggestion_pairs(column_profiles, s, exclude_children=(references or {}).keys())
+    for i, (child, parent) in enumerate(pairs):
+        if i >= s.max_reference_suggestions:
+            suggestions.append(suggestion_entry(child, parent, "over_limit"))
+        elif mode == "list":
+            suggestions.append(suggestion_entry(child, parent, "listed"))
+        else:
+            r = check_reference(df[child], df[parent], child, parent, "suggested", True, child in sensitive,
+                                sample_n=s.ri_sample_orphans)
+            kept = keep_suggestion(r, s)
+            if kept:
                 results.append(r)
-    return results
+            suggestions.append(suggestion_entry(child, parent, "checked" if kept else "below_match"))
+    return results, suggestions

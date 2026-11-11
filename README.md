@@ -66,7 +66,16 @@ same-table references on its own when a column's name points at an
 identifier column (`referred_by_customer_id` -> `customer_id`, or any
 `*_id` -> a column called `id`) and at least 90% of its values match.
 Value overlap alone isn't enough, because surrogate keys 1..N overlap by
-chance. Turn suggestions off with `DataProfiler(suggest_references=False)`.
+chance.
+
+When suggestions are made: after the column statistics are computed,
+because that is when datascope knows which columns really look like keys
+(identifier, no NULLs, at least 99% unique). With pandas the suggested
+checks then run in memory. On BigQuery each one would be an extra query,
+so by default they are only **listed**, with the cost of checking each
+(from a free dry run), and the run summary gives the flag that checks
+them. `--suggested-references check|list|off` overrides either default,
+and every threshold above is a setting (see below).
 
 Try it first on synthetic data (customers table with realistic messiness
 baked in — PII, a couple of quality bugs, correlated missingness,
@@ -162,14 +171,30 @@ columns come from `CORR()` in the same scan.
   large tables.
 - Pearson correlations between numeric columns are computed with `CORR()`
   in the first profiling query (first `max_correlation_cols=30` numeric
-  columns; `0` turns them off). They agree with the pandas engine; the
-  missing-value correlation matrix is not computed.
+  columns). That query already reads every numeric column of a table of
+  up to `max_columns_per_query` columns, so they usually cost nothing;
+  on wider tables it also reads the numeric columns of later batches.
+  `--estimate` shows the exact extra bytes, and `--no-correlations`
+  (`correlations=False`) turns them off. They agree with the pandas
+  engine; the missing-value correlation matrix is not computed.
 - Each referential-integrity check is one extra query: an anti-join that
-  reads only the two key columns and returns at most five rows. Declared
-  checks always run. Up to `max_reference_suggestions=5` suggested ones
-  are planned from column names (so `--estimate` and `--print-sql`
-  include them) but only run if the profile shows the parent column is
-  really a key.
+  reads only the two key columns and returns at most `ri_sample_orphans`
+  rows. Nothing is joined beyond that pair. Declared checks always run.
+  Suggested ones are listed with their cost by default (see Referential
+  integrity above); with `--suggested-references check` they run after
+  profiling, but only where the profile shows the parent column is a key.
+  `--estimate` then counts every name-matched pair, as an upper bound.
+- `--estimate` (`estimate_bigquery_cost`) breaks the cost down by section:
+  profiling, correlations, and each reference check:
+
+  ```
+  This profile will process 1.21 GB when run (about $0.0074 at $6.25/TiB on-demand). Nothing was run.
+
+    profiling                                               1.16 GB  $0.0071
+    correlations                                               0 B   $0.0000  Extra columns the first profiling query reads ...
+    reference customer_id -> my-project.sales.customers.id  48.2 MB  $0.0003
+    suggested references                                       0 B   $0.0000  Listed after profiling with their cost, not run ...
+  ```
 - Not computed yet (each needs extra passes over the data): histograms,
   outlier counts, skew/kurtosis, duplicate rows, composite
   keys, functional dependencies, and detecting dates stored as text.
@@ -186,6 +211,158 @@ columns come from `CORR()` in the same scan.
   `result["meta"]["skipped_columns"]`.
 - `ARRAY` columns count empty arrays as missing; `ARRAY`/`STRUCT`/`JSON`/
   `GEOGRAPHY` columns only get null and distinct counts.
+
+## Settings and repeatable runs
+
+Every threshold and limit that decides which checks run, or what gets
+flagged, is a setting with a default. From the command line each one is
+a flag (`datascope --help` lists them all, grouped by check). From
+Python, pass a `Settings` object or the same names as keywords:
+
+```python
+from datascope import DataProfiler, Settings, profile
+
+profile(df, ri_parent_min_unique_pct=90, max_correlation_cols=60)
+DataProfiler(settings=Settings(correlations=False, suggested_references="list"))
+```
+
+```
+datascope data.csv --ri-parent-min-unique-pct 90 --max-correlation-cols 60
+```
+
+**Every run reports what it did and didn't check.** After a run, the
+command line prints, and the report's **Run summary** panel shows:
+
+- each check family, with its status: ran, partial (a limit kicked in),
+  skipped (turned off), listed (found but not run), not set up (needs
+  input, e.g. `--reference`), or not available on this engine;
+- the flag that would extend each partial, skipped or listed check;
+- a command that **extends** the run with all of those flags at once,
+  and one that **reproduces** it exactly;
+- every setting used, with changed values highlighted, plus the
+  datascope version.
+
+```
+Checks:
+  ✓ Column statistics                  ran           All 19 columns: nulls, distinct counts, ...
+  ◐ PII/PHI content checks             partial       Values sampled: 500 rows per column (largest column has 4,012). ...  → --sample-size 4012
+  ◐ Correlations                       partial       First 3 of 5 numeric columns.  → --max-correlation-cols 5
+  ✓ Primary-key search                 ran           No key can be unique: the table has 12 exact duplicate rows.
+  · Referential integrity (declared)   not set up    None declared.  (set up with --reference CHILD=PARENT ...)
+  ...
+
+To extend this run with every → change above:
+  datascope customers.csv --sample-size 4012 --max-correlation-cols 5
+
+To reproduce this run:
+  datascope customers.csv --sample-size 500 --max-correlation-cols 3
+```
+
+All of it is also in the returned dict: `result["meta"]["settings"]`,
+`["checks"]`, `["command"]` and `["extend_command"]`. When the data came
+from Python rather than a file, the command uses an `INPUT` placeholder.
+
+### All settings
+
+<!-- settings-table:start (generated from datascope/settings.py; tests check it is current) -->
+**Column statistics and sampling**
+
+| Flag / keyword | Default | Engines | What it does |
+|---|---|---|---|
+| `--top-n-values` / `top_n_values` | `10` | both | Most frequent values kept per column. |
+| `--histogram-bins` / `histogram_bins` | `30` | pandas | Bars in each numeric histogram. |
+| `--sample-size` / `sample_size_for_content_checks` | `1000` | pandas | Rows sampled per column for PII/PHI content checks (regex on values). Larger = slower, fewer misses. |
+| `--random-state` / `random_state` | `42` | pandas | Seed for that sample, so reruns flag the same columns. |
+
+**Alert thresholds**
+
+| Flag / keyword | Default | Engines | What it does |
+|---|---|---|---|
+| `--missing-warning-pct` / `missing_warning_pct` | `20` | both | A column with more than this % missing raises a warning. |
+| `--missing-high-pct` / `missing_high_pct` | `50` | both | A column with more than this % missing raises a high-severity alert. |
+| `--outlier-alert-pct` / `outlier_alert_pct` | `5` | pandas | Alert when more than this % of a numeric column is outside 1.5x IQR. |
+| `--sensitive-alert-min-confidence` / `sensitive_alert_min_confidence` | `0.7` | both | Alert on a sensitive (PII/PHI/PCI) column only at or above this detection confidence (0-1). Columns below it are still flagged and masked, just without an alert. |
+
+**Correlations**
+
+| Flag / keyword | Default | Engines | What it does |
+|---|---|---|---|
+| `--correlations` / `correlations` | `on` | both | Pearson correlation matrix of numeric columns (and, on pandas, the missing-value correlation matrix). On BigQuery this adds CORR() terms to the first profiling query: free for tables of up to --max-columns-per-query columns, see --estimate for the exact cost. |
+| `--max-correlation-cols` / `max_correlation_cols` | `30` | both | Correlate at most this many numeric columns (n*(n-1)/2 pairs). |
+| `--high-correlation-threshold` / `high_correlation_threshold` | `0.8` | both | Alert on column pairs with \|r\| at or above this. |
+
+**Keys and duplicates**
+
+| Flag / keyword | Default | Engines | What it does |
+|---|---|---|---|
+| `--max-pk-candidate-pool` / `max_pk_candidate_pool` | `10` | pandas | Composite primary-key search: consider this many of the most distinct no-null columns. |
+| `--max-pk-combo-size` / `max_pk_combo_size` | `3` | pandas | Composite primary-key search: try combinations of up to this many columns. |
+| `--max-duplicate-column-check` / `max_duplicate_column_check` | `100` | pandas | Skip identical-column detection on tables wider than this (every pair is compared). |
+
+**Functional dependencies (column A determines column B)**
+
+| Flag / keyword | Default | Engines | What it does |
+|---|---|---|---|
+| `--functional-dependencies` / `functional_dependencies` | `on` | pandas | Search for column A -> column B dependencies (zip -> state). |
+| `--fd-min-purity` / `fd_min_purity` | `0.98` | pandas | Report A -> B when at least this share (0-1) of evidence rows agree with the majority B for their A. |
+| `--fd-min-support-rows` / `fd_min_support_rows` | `20` | pandas | Ignore a pair with fewer evidence rows than this. |
+| `--max-fd-candidate-pool` / `max_fd_candidate_pool` | `25` | pandas | Test at most this many columns as either side (pairs grow with the square). |
+
+**Referential integrity**
+
+| Flag / keyword | Default | Engines | What it does |
+|---|---|---|---|
+| `--suggested-references` / `suggested_references` | `auto` | both | What to do with references datascope suggests itself (same table, from column names): 'check' runs them; 'list' only lists them, with their cost on BigQuery; 'off' skips them. 'auto' = check on pandas, list on BigQuery (where each is an extra query). |
+| `--max-reference-suggestions` / `max_reference_suggestions` | `10` | both | Check or list at most this many suggested references. |
+| `--ri-parent-min-unique-pct` / `ri_parent_min_unique_pct` | `99` | both | A suggested reference's target must be an identifier column, with no NULLs and at least this % unique. Below 100 so that duplicate rows don't hide a real key; lower it for messier data. |
+| `--ri-suggest-min-match-pct` / `ri_suggest_min_match_pct` | `90` | both | Keep a suggestion only if at least this % of its rows match the target; fewer means it is probably not a reference at all. |
+| `--ri-suggest-min-rows` / `ri_suggest_min_rows` | `10` | both | Don't suggest a reference for a column with fewer non-null rows. |
+| `--ri-suggest-min-distinct` / `ri_suggest_min_distinct` | `3` | both | Don't suggest a reference for a column with fewer distinct values. |
+| `--ri-sample-orphans` / `ri_sample_orphans` | `5` | both | Example orphan values kept per check (the most frequent). |
+| `--ri-high-orphan-pct` / `ri_high_orphan_pct` | `5` | both | A declared check with more than this % orphan rows raises a high-severity alert; otherwise a warning. |
+
+**BigQuery query shape**
+
+| Flag / keyword | Default | Engines | What it does |
+|---|---|---|---|
+| `--exact-distinct` / `exact_distinct` | `on` | BigQuery | Exact COUNT(DISTINCT). --no-exact-distinct uses APPROX_COUNT_DISTINCT: cheaper on very large tables, but disables primary-key detection. |
+| `--max-columns-per-query` / `max_columns_per_query` | `100` | BigQuery | Split wide tables into profiling queries of at most this many columns. |
+<!-- settings-table:end -->
+
+### Fixed heuristics
+
+These rules are not settings. They decide how a column is classified and
+when PII is suspected, and changing them means changing the code. The
+report records the datascope version, which pins them.
+
+- **Semantic type** (`semantic.py`): two distinct values → binary
+  categorical, or boolean if they look like true/false. Numeric columns
+  ≥ 95% unique with more than 20 values → identifier if the name reads as
+  an id, otherwise continuous; numeric with ≤ 20 distinct values or < 5%
+  unique → discrete categorical. Text with a `-` or `/` in most values that
+  parses as dates for > 90% of a 200-value sample → dates stored as text.
+  Text ≥ 98% unique → identifier (short values or an id-like name),
+  otherwise free text; average length > 80 characters → free text;
+  ≤ 50 distinct values or < 10% unique → categorical; otherwise
+  high-cardinality text.
+- **PII/PHI/PCI detection** (`pii.py`): a column is flagged when its name
+  matches a keyword list, or when ≥ 60% of the sampled values match a
+  pattern (email, phone, national ID, IP address, credit card with a Luhn
+  check, IBAN). Its confidence is 0.55 for a name match plus 0.5 × the
+  value match rate (+0.05 for a passed checksum), capped at 0.99;
+  `--sensitive-alert-min-confidence` applies to that number.
+- **Quality-rule suggestions** (`quality.py`): accepted values when the
+  top values cover ≥ 99% of rows; an outlier review when > 1% of values
+  are outside 1.5× IQR; a non-negative check when the name contains
+  count, amount, qty, quantity, price, total, age, duration, length,
+  size, score or balance.
+- **Outliers** are values outside 1.5× the interquartile range.
+- **Functional dependencies** (`relationships.py`): near-unique (≥ 99%
+  unique) and constant columns are left out of the search; only
+  determinant values that repeat count as evidence; up to 5 counter-example
+  rows are kept per dependency.
+- **Alerts**: at most 8 correlated pairs and 8 dependencies become alerts
+  (the panels list them all).
 
 ## What it computes, per column
 
@@ -249,9 +426,11 @@ src/datascope/
   quality.py       quality-rule + dbt-snippet recommendations
   relationships.py functional dependency detection (column A -> column B)
   referential.py   referential-integrity checks (declared and suggested references)
+  settings.py      every tunable threshold: defaults, validation, CLI flags and help
+  run_summary.py   what each run checked or left out, and the reproduce/extend commands
   html_report.py   renders the profile dict to the HTML dashboard
   bigquery.py      BigQuery engine: generates profiling SQL, maps results to the profile dict
-  cli.py / __main__.py   `python -m datascope`
+  cli.py / __main__.py   `datascope` / `python -m datascope` (flags generated from settings.py)
 tests/              pytest suite (duckdb_bigquery.py runs the generated BigQuery SQL on DuckDB)
 example.py          synthetic messy dataset + runnable demo
 ```
