@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..40,400..500,0..1,0" rel="stylesheet">
+<style>
+:root {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --surface-2: #f1f3f4;
+  --border: #dadce0;
+  --text: #202124;
+  --text-muted: #5f6368;
+  --text-faint: #80868b;
+
+  --teal: #1a73e8;        /* Google Blue — the one accent used for emphasis/identity */
+  --teal-soft: rgba(26,115,232,0.09);
+  --amber: #b06000;       /* darkened for AA text contrast; still reads as amber/warning */
+  --amber-soft: rgba(249,171,0,0.16);
+  --coral: #d93025;       /* Google Red */
+  --coral-soft: rgba(217,48,37,0.08);
+  --violet: #8430ce;      /* reserved exclusively for sensitive-data flags */
+  --violet-soft: rgba(132,48,206,0.09);
+  --green: #188038;       /* Google Green */
+  --green-soft: rgba(24,128,56,0.10);
+  --blue: #1a73e8;
+
+  --font-mono: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 2px 0 rgba(60,64,67,0.30), 0 1px 3px 1px rgba(60,64,67,0.15);
+}
+* { box-sizing: border-box; }
+html { color-scheme: light; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; font-weight: 600; }
+p { margin: 0; }
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 3px; }
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined'; font-weight: normal; font-style: normal;
+  display: inline-block; line-height: 1; letter-spacing: normal; text-transform: none;
+  white-space: nowrap; word-wrap: normal; direction: ltr; -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'GRAD' 0, 'opsz' 20, 'wght' 400;
+  vertical-align: middle; user-select: none; flex-shrink: 0;
+}
+.icon { font-size: 20px; }
+.icon-sm { font-size: 16px; }
+.icon-lg { font-size: 34px; }
+.icon-xl { font-size: 24px; }
+.icon-fill { font-variation-settings: 'FILL' 1, 'GRAD' 0, 'opsz' 24, 'wght' 500; }
+.row-icon { display: inline-flex; align-items: center; gap: 4px; }
+
+.topbar { position: sticky; top: 0; z-index: 50; background: var(--surface);
+  border-bottom: 1px solid var(--border); }
+.topbar-inner { max-width: 1240px; margin: 0 auto; padding: 14px 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--font-mono); }
+.brand-mark { color: var(--teal); font-size: 18px; }
+.brand-text { font-weight: 600; letter-spacing: 0.08em; font-size: 13px; }
+.topbar-meta { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+.topbar-meta .dot { color: var(--text-faint); }
+
+main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 80px; }
+.view[hidden] { display: none; }
+section { margin-bottom: 22px; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.kpi-grid, .panel, .columns-section { animation: rise 0.5s ease both; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
+}
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 18px 20px; box-shadow: var(--shadow); }
+.panel-title { font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--text-muted); font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.panel-sub { color: var(--text-faint); font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11px; }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; box-shadow: var(--shadow); animation: rise 0.4s ease both; animation-delay: calc(var(--i, 0) * 50ms); }
+.kpi-icon-badge { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; background: var(--badge-bg, var(--surface-2)); }
+.kpi-icon-badge .icon { color: var(--badge-color, var(--text-muted)); }
+.kpi-value { font-family: var(--font-mono); font-size: 22px; font-weight: 600; }
+.kpi-label { font-size: 10.5px; color: var(--text-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+.kpi-link { position: relative; display: flex; flex-direction: column; justify-content: flex-start; width: 100%; text-align: left; cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease; }
+.kpi-link:hover { transform: translateY(-2px); border-color: var(--teal); }
+.kpi-link-arrow { position: absolute; top: 14px; right: 14px; color: var(--text-faint); transition: color .15s ease, transform .15s ease; }
+.kpi-link:hover .kpi-link-arrow, .kpi-link:focus-visible .kpi-link-arrow { color: var(--teal); transform: translateY(2px); }
+#dq-section, #columns-section, #sensitive-panel { scroll-margin-top: 76px; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--teal); } to { box-shadow: 0 0 0 3px transparent; } }
+.flash { animation: flash 1.4s ease-out; border-radius: var(--radius); }
+.kpi-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.kpi-bar { margin-top: 10px; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+.kpi-bar span { display: block; height: 100%; border-radius: 2px; transition: width 0.6s ease; }
+
+.alert-list { display: flex; flex-direction: column; gap: 1px; background: var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.alert-row { background: var(--surface); padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; border-left: 3px solid var(--sev-color, var(--border)); }
+.alert-glyph { color: var(--sev-color, var(--text-muted)); font-size: 12px; margin-top: 2px; flex-shrink: 0; }
+.alert-msg { font-size: 13.5px; color: var(--text); }
+.alert-col { font-family: var(--font-mono); color: var(--text); font-weight: 600; }
+.alert-col-link { font-family: var(--font-mono); font-weight: 600; color: var(--teal); background: none; border: none; padding: 0; cursor: pointer; font-size: inherit; }
+.alert-col-link:hover { text-decoration: underline; }
+.dq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.dq-scope { min-width: 0; padding: 4px 0; }
+.dq-scope + .dq-scope { border-left: 1px solid var(--border); padding-left: 22px; margin-left: 22px; }
+@media (max-width: 880px) {
+  .dq-grid { grid-template-columns: 1fr; }
+  .dq-scope + .dq-scope { border-left: none; margin-left: 0; padding-left: 0; border-top: 1px solid var(--border); margin-top: 18px; padding-top: 18px; }
+}
+.dq-scope-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.scope-tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  padding: 4px 10px 4px 8px; border-radius: 999px; }
+.scope-tag .icon { color: var(--teal); }
+.scope-desc { font-size: 12.5px; color: var(--text-muted); }
+.dq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.dq-tiles .kpi-card { box-shadow: none; }
+.dq-alerts-head { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
+  font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.dq-alerts-head .count { color: var(--text-faint); font-weight: 400; }
+.alert-empty, .empty-state { color: var(--text-faint); font-size: 13px; padding: 6px 0; }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.two-col > * { min-width: 0; }  /* let wide heatmaps scroll inside their panel instead of widening the page */
+@media (max-width: 880px) { .two-col { grid-template-columns: 1fr; } }
+
+.dist-row { display: grid; grid-template-columns: 150px 1fr 40px; align-items: center; gap: 10px; padding: 5px 0; font-size: 12.5px; }
+.dist-label { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dist-bar-track { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.dist-bar-fill { display: block; height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+.dist-count { font-family: var(--font-mono); text-align: right; color: var(--text-muted); }
+
+.heatmap-scroll { overflow-x: auto; }
+table.heatmap { border-collapse: separate; border-spacing: 3px; font-family: var(--font-mono); font-size: 10.5px; }
+table.heatmap th, table.heatmap td { text-align: center; white-space: nowrap; }
+table.heatmap th { padding: 4px 6px; }
+.heat-row-head, .heat-col-head { color: var(--text-muted); font-weight: 500; }
+.heat-cell { border-radius: 4px; cursor: default; width: 42px; height: 42px; min-width: 42px; max-width: 42px; padding: 0; }
+
+.pk-row { display: flex; gap: 10px; align-items: center; padding: 6px 0; font-size: 13px; }
+.pk-type { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--teal); background: var(--teal-soft); padding: 2px 7px; border-radius: 4px; }
+.pk-cols { font-family: var(--font-mono); color: var(--text); }
+.fd-row { display: flex; gap: 10px; align-items: center; padding: 7px 0; font-size: 13px; border-top: 1px solid var(--border); }
+.fd-row:first-child { border-top: none; }
+.fd-expr { font-family: var(--font-mono); color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fd-expr b { color: var(--text); font-weight: 600; }
+.fd-arrow { color: var(--text-muted); }
+.fd-purity { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.fd-purity-exact { color: var(--teal); background: var(--teal-soft); }
+.fd-purity-partial { color: var(--amber); background: var(--amber-soft); }
+.fd-support { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
+
+.ri-row { padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.ri-row:first-child { border-top: none; }
+.ri-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ri-expr { font-family: var(--font-mono); flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.ri-expr .alert-col-link { font-size: 13px; }
+.ri-tag { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+  color: var(--text-muted); background: var(--surface-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.ri-status { font-family: var(--font-mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+  color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
+.ri-detail { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+.ri-detail code { font-family: var(--font-mono); color: var(--text); }
+.sens-intro { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; max-width: 900px; }
+.sens-intro b { color: var(--text); font-weight: 500; }
+.sens-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sens-table th { text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-faint); padding: 6px 12px 6px 0; }
+.sens-table td { padding: 8px 12px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.sens-kind { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+  color: var(--violet); background: var(--violet-soft); padding: 2px 7px; border-radius: 4px; }
+.sens-why { color: var(--text-muted); }
+.sens-conf { font-family: var(--font-mono); white-space: nowrap; }
+.sens-conf .panel-sub { display: block; font-family: var(--font-sans); }
+.detail-why { font-size: 13px; color: var(--text-muted); margin-top: 6px; max-width: 640px; }
+.detail-why b { color: var(--violet); font-weight: 500; }
+.run-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -6px 0 22px; padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: var(--radius-sm); font-size: 13px; }
+.run-strip a { color: var(--teal); font-weight: 500; text-decoration: none; }
+.run-strip a:hover { text-decoration: underline; }
+#run-section { scroll-margin-top: 76px; }
+.run-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.run-table td { padding: 8px 10px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.run-table tr:first-child td { border-top: none; }
+.run-name { font-weight: 500; white-space: nowrap; }
+.run-detail { color: var(--text-muted); }
+.run-flags code, .set-flag { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; color: var(--text); white-space: nowrap; }
+.run-hint { color: var(--text-faint); font-size: 12px; }
+.run-hint, .set-help, .ri-detail { font-variant-ligatures: none; }
+.run-status { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px;
+  border-radius: 4px; white-space: nowrap; color: var(--sev-color); background: var(--sev-bg); display: inline-flex; align-items: center; gap: 4px; }
+.run-cmd { margin-top: 18px; }
+.run-cmd-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px;
+  font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.run-cmd .code-block { white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-cmd-note { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+details.settings { margin-top: 18px; }
+details.settings summary { cursor: pointer; font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.set-group { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); padding-top: 14px !important; }
+.set-row td { padding: 6px 10px 6px 0; border-top: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+.set-val { font-family: var(--font-mono); white-space: nowrap; }
+.set-changed .set-val { color: var(--teal); font-weight: 600; }
+.set-help { color: var(--text-muted); }
+.set-engine { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+@media (max-width: 640px) {
+  .run-table, .run-table tbody, .run-table tr, .run-table td { display: block; }
+  .run-table tr { border-top: 1px solid var(--border); padding: 8px 0; }
+  .run-table tr:first-child { border-top: none; }
+  .run-table td, .set-row td { border-top: none; padding: 2px 0; }
+  .run-name { white-space: normal; }
+  .run-flags code, .set-flag { white-space: normal; overflow-wrap: anywhere; }
+  .set-engine, .set-default { display: none; }
+  .topbar-meta { flex-wrap: wrap; min-width: 0; }
+  #source-name { overflow-wrap: anywhere; }
+}
+.columns-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.columns-title { font-family: var(--font-mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-muted); font-weight: 600; }
+.column-count { font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); }
+.columns-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.search-input { flex: 1 1 220px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 13.5px; }
+.search-input::placeholder { color: var(--text-faint); }
+.sort-select { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 10px; font-size: 13px; }
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; font-size: 12px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: border-color .15s ease, color .15s ease, background .15s ease; }
+.chip:hover { border-color: var(--text-faint); color: var(--text); }
+.chip.active { border-color: var(--teal); color: var(--teal); background: var(--teal-soft); }
+.chip-sensitive.active { border-color: var(--violet); color: var(--violet); background: var(--violet-soft); }
+.chip-count { font-family: var(--font-mono); opacity: 0.75; }
+
+.column-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 14px; }
+.col-card { display: block; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 14px 12px; cursor: pointer; transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; animation: rise 0.4s ease both; animation-delay: calc(var(--i, 0) * 25ms); }
+.col-card:hover { transform: translateY(-2px); border-color: var(--teal); box-shadow: var(--shadow); }
+.col-card-head { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+.col-glyph { font-size: 13px; flex-shrink: 0; }
+.col-glyph.large { font-size: 26px; }
+.col-name { font-family: var(--font-mono); font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.sens-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--violet); flex-shrink: 0; box-shadow: 0 0 0 3px var(--violet-soft); }
+.col-type-label { font-size: 11px; color: var(--text-faint); margin-bottom: 10px; }
+.col-card-caption { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.col-card-foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-faint); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.col-card-foot b { color: var(--text-muted); font-family: var(--font-mono); font-weight: 600; }
+
+.bars { display: flex; align-items: flex-end; gap: 2px; }
+.bars-sm { height: 46px; }
+.bars-lg { height: 190px; gap: 3px; }
+.bar-el { flex: 1; background: var(--teal); border-radius: 2px 2px 0 0; min-width: 2px; transition: opacity .15s ease; }
+.bar-el:hover { opacity: 0.7; }
+.bars-empty { height: 46px; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 10.5px; font-family: var(--font-mono); }
+
+.back-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px; cursor: pointer; margin-bottom: 20px; font-family: var(--font-mono); transition: border-color .15s ease, color .15s ease; }
+.back-btn:hover { border-color: var(--teal); color: var(--teal); }
+
+.detail-header { margin-bottom: 20px; }
+.detail-title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.detail-name { font-family: var(--font-mono); font-size: 25px; font-weight: 600; overflow-wrap: anywhere; }
+.detail-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.badge { font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; border-radius: 999px; border: none; background: var(--badge-bg, var(--surface-2)); color: var(--badge-color, var(--text-muted)); text-transform: uppercase; letter-spacing: 0.03em; }
+.detail-note { font-size: 13px; color: var(--text-muted); max-width: 640px; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 22px; }
+.stat-cell { background: var(--surface); padding: 12px 14px; }
+.stat-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); margin-bottom: 4px; }
+.stat-value { font-family: var(--font-mono); font-size: 15px; font-weight: 600; }
+
+.detail-block { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 20px; }
+.ruler-heading { font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+
+.ruler-track { position: relative; height: 74px; margin: 0 10px; }
+.ruler-baseline { position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: var(--border); }
+.ruler-band { position: absolute; top: calc(50% - 4px); height: 8px; background: var(--teal-soft); border-radius: 4px; }
+.ruler-mark { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); }
+.ruler-mark-line { position: absolute; top: 50%; width: 1px; height: 14px; background: var(--text-faint); transform: translateY(-50%) translateX(-50%); left: 50%; }
+.ruler-mark-line.strong { width: 2px; height: 20px; background: var(--teal); }
+.ruler-mark-line.end { height: 22px; background: var(--text-muted); }
+.ruler-mark-label { position: absolute; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.ruler-mark-label.above { bottom: calc(50% + 14px); }
+.ruler-mark-label.above.strong { color: var(--teal); font-weight: 600; bottom: calc(50% + 20px); }
+.ruler-mark-label.below { top: calc(50% + 16px); }
+
+.detail-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 780px) { .detail-two-col { grid-template-columns: 1fr; } }
+.tv-list, .rule-list { display: flex; flex-direction: column; gap: 8px; }
+.tv-row { display: grid; grid-template-columns: 1fr 90px 52px; align-items: center; gap: 8px; font-size: 12.5px; }
+.tv-label { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-bar-track { height: 7px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.tv-bar-fill { display: block; height: 100%; background: var(--teal); border-radius: 4px; }
+.tv-pct { font-family: var(--font-mono); text-align: right; color: var(--text-muted); }
+
+.rule-row { display: flex; gap: 9px; align-items: flex-start; padding: 8px 10px; background: var(--surface-2); border-left: 3px solid var(--sev-color, var(--border)); border-radius: 4px; }
+.rule-glyph { color: var(--sev-color, var(--text-muted)); font-size: 11px; margin-top: 2px; }
+.rule-desc { font-size: 12.5px; color: var(--text); }
+
+.copy-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 11px; cursor: pointer; text-transform: none; letter-spacing: 0; font-family: var(--font-sans); }
+.copy-btn:hover { border-color: var(--teal); color: var(--teal); }
+.code-block { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; margin: 0; }
+
+.tooltip { position: fixed; display: none; z-index: 1000; background: #3c4043; border: none; color: #ffffff; font-family: var(--font-mono); font-size: 11.5px; padding: 6px 10px; border-radius: 5px; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.25); max-width: 240px; line-height: 1.45; }
+
+.footer { max-width: 1240px; margin: 0 auto; padding: 0 24px 40px; text-align: center; color: var(--text-faint); font-size: 12px; }
+
+@media (max-width: 640px) {
+  main { padding: 18px 14px 60px; }
+  .topbar-inner { padding: 12px 16px; }
+  .detail-name { font-size: 20px; }
+  .dist-row { grid-template-columns: 110px 1fr 34px; }
+}
+.search-wrap { position: relative; flex: 1 1 220px; display: flex; align-items: center; }
+.search-wrap > .icon { position: absolute; left: 10px; color: var(--text-faint); pointer-events: none; }
+.search-wrap .search-input { flex: 1 1 auto; padding-left: 34px; }
+.toolbar-label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-faint); margin-right: -2px; }
+.stat-cell-head { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+.stat-cell-head .icon { color: var(--text-faint); }
+.sens-icon { color: var(--violet); flex-shrink: 0; }
+.col-card-foot span { display: inline-flex; align-items: center; gap: 3px; }
+.col-card-foot .icon { color: var(--text-faint); }
+.brand-mark.icon { font-size: 20px; }
+.back-btn { display: inline-flex; align-items: center; gap: 6px; }
+.copy-btn { display: inline-flex; align-items: center; gap: 4px; }
+.panel-title .icon, .ruler-heading .icon { color: var(--text-faint); }
+.dbt-heading-row { display: flex; align-items: center; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div id="tooltip" class="tooltip" role="tooltip"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="material-symbols-outlined brand-mark icon">dataset</span><span class="brand-text">DATA PROFILE</span></div>
+    <div class="topbar-meta"><span id="source-name"></span><span class="dot">&middot;</span><span class="material-symbols-outlined icon icon-sm">schedule</span><span id="generated-at"></span></div>
+  </div>
+</header>
+
+<main id="view-dashboard" class="view">
+  <section class="kpi-grid" id="kpi-grid">
+  </section>
+  <div class="run-strip" id="run-strip" hidden></div>
+
+  <section class="panel" id="dq-section">
+    <div class="panel-title"><span class="material-symbols-outlined icon">fact_check</span>Data quality</div>
+    <div class="dq-grid">
+      <div class="dq-scope" id="dq-table"></div>
+      <div class="dq-scope" id="dq-column"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="sensitive-panel" hidden>
+    <div class="panel-title"><span class="material-symbols-outlined icon">shield_person</span>Personal &amp; sensitive data <span class="panel-sub">columns that look like they identify people, or hold health or payment data</span></div>
+    <div id="sensitive-body"></div>
+  </section>
+
+  <section class="two-col">
+    <div class="panel">
+      <div class="panel-title"><span class="material-symbols-outlined icon">category</span>Type distribution</div>
+      <div id="type-dist-bars"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span class="material-symbols-outlined icon">scatter_plot</span>Correlation <span class="panel-sub">Pearson &middot; numeric columns</span></div>
+      <div id="corr-heatmap" class="heatmap-scroll"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="missing-corr-section" style="display:none">
+    <div class="panel-title"><span class="material-symbols-outlined icon">link</span>Missing-value correlation <span class="panel-sub">columns that tend to be null together</span></div>
+    <div id="missing-corr-heatmap" class="heatmap-scroll"></div>
+  </section>
+
+  <section class="panel" id="pk-panel" style="display:none">
+    <div class="panel-title"><span class="material-symbols-outlined icon">key</span>Primary-key candidates</div>
+    <div id="pk-list"></div>
+  </section>
+
+  <section class="panel" id="fd-panel" style="display:none">
+    <div class="panel-title"><span class="material-symbols-outlined icon">account_tree</span>Column relationships <span class="panel-sub">functional dependencies</span></div>
+    <div id="fd-list"></div>
+  </section>
+
+  <section class="panel" id="ri-panel" style="display:none">
+    <div class="panel-title"><span class="material-symbols-outlined icon">conversion_path</span>Referential integrity <span class="panel-sub">do referenced values exist in their key column?</span></div>
+    <div id="ri-list"></div>
+  </section>
+
+  <section class="columns-section" id="columns-section">
+    <div class="columns-header">
+      <div class="columns-title"><span class="material-symbols-outlined icon">table_view</span>Columns</div>
+      <div class="column-count" id="column-count"></div>
+    </div>
+    <div class="columns-toolbar">
+      <div class="search-wrap">
+        <span class="material-symbols-outlined icon">search</span>
+        <input type="text" id="search-input" class="search-input" placeholder="Search columns&hellip;" aria-label="Search columns">
+      </div>
+      <span class="toolbar-label"><span class="material-symbols-outlined icon icon-sm">tune</span>Filter</span>
+      <div class="filter-chips" id="filter-chips"></div>
+      <span class="toolbar-label"><span class="material-symbols-outlined icon icon-sm">sort</span></span>
+      <select id="sort-select" class="sort-select" aria-label="Sort columns">
+        <option value="name">Sort: name</option>
+        <option value="missing">Sort: missing %</option>
+        <option value="unique">Sort: unique %</option>
+      </select>
+    </div>
+    <div id="column-grid" class="column-grid"></div>
+  </section>
+
+  <section class="panel" id="run-section" hidden>
+    <div class="panel-title"><span class="material-symbols-outlined icon">fact_check</span>Run summary <span class="panel-sub">what was checked, what wasn't, and how to repeat or extend this run</span></div>
+    <div id="run-body"></div>
+  </section>
+</main>
+
+<main id="view-detail" class="view" hidden>
+  <button id="back-btn" class="back-btn"><span class="material-symbols-outlined icon">arrow_back</span>Dashboard</button>
+  <div id="detail-content"></div>
+</main>
+
+<footer class="footer"><span class="material-symbols-outlined icon icon-sm" style="vertical-align:-2px">lock</span> Values in columns that look like personal or sensitive data are masked throughout. Type and quality-rule suggestions are heuristic &mdash; verify before enforcing.</footer>
+
+<script>
+const PROFILE = {"meta": {"source_name": "query", "generated_at": "2026-11-11T22:26:06.355625+00:00", "n_rows": 1000, "n_cols": 24, "memory_mb": null, "duplicate_rows": null, "duplicate_rows_pct": null, "engine": "bigquery", "sql": ["SELECT\n  COUNT(*) AS n_rows,\n  -- vendor_id (STRING)\n  COUNTIF(`vendor_id` IS NULL) AS c0__missing,\n  APPROX_COUNT_DISTINCT(`vendor_id`) AS c0__distinct,\n  MIN(CHAR_LENGTH(`vendor_id`)) AS c0__min_length,\n  MAX(CHAR_LENGTH(`vendor_id`)) AS c0__max_length,\n  AVG(CHAR_LENGTH(`vendor_id`)) AS c0__mean_length,\n  COUNTIF(TRIM(`vendor_id`) = '') AS c0__blank,\n  APPROX_TOP_COUNT(CAST(`vendor_id` AS STRING), 11) AS c0__top,\n  -- pickup_datetime (TIMESTAMP)\n  COUNTIF(`pickup_datetime` IS NULL) AS c1__missing,\n  APPROX_COUNT_DISTINCT(`pickup_datetime`) AS c1__distinct,\n  MIN(`pickup_datetime`) AS c1__min,\n  MAX(`pickup_datetime`) AS c1__max,\n  DATE_DIFF(CAST(MAX(`pickup_datetime`) AS DATE), CAST(MIN(`pickup_datetime`) AS DATE), DAY) AS c1__range_days,\n  COUNTIF(`pickup_datetime` > CURRENT_TIMESTAMP()) AS c1__future,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `pickup_datetime`) = 1) AS c1__dow1,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `pickup_datetime`) = 2) AS c1__dow2,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `pickup_datetime`) = 3) AS c1__dow3,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `pickup_datetime`) = 4) AS c1__dow4,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `pickup_datetime`) = 5) AS c1__dow5,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `pickup_datetime`) = 6) AS c1__dow6,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `pickup_datetime`) = 7) AS c1__dow7,\n  APPROX_TOP_COUNT(CAST(`pickup_datetime` AS STRING), 11) AS c1__top,\n  -- dropoff_datetime (TIMESTAMP)\n  COUNTIF(`dropoff_datetime` IS NULL) AS c2__missing,\n  APPROX_COUNT_DISTINCT(`dropoff_datetime`) AS c2__distinct,\n  MIN(`dropoff_datetime`) AS c2__min,\n  MAX(`dropoff_datetime`) AS c2__max,\n  DATE_DIFF(CAST(MAX(`dropoff_datetime`) AS DATE), CAST(MIN(`dropoff_datetime`) AS DATE), DAY) AS c2__range_days,\n  COUNTIF(`dropoff_datetime` > CURRENT_TIMESTAMP()) AS c2__future,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `dropoff_datetime`) = 1) AS c2__dow1,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `dropoff_datetime`) = 2) AS c2__dow2,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `dropoff_datetime`) = 3) AS c2__dow3,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `dropoff_datetime`) = 4) AS c2__dow4,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `dropoff_datetime`) = 5) AS c2__dow5,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `dropoff_datetime`) = 6) AS c2__dow6,\n  COUNTIF(EXTRACT(DAYOFWEEK FROM `dropoff_datetime`) = 7) AS c2__dow7,\n  APPROX_TOP_COUNT(CAST(`dropoff_datetime` AS STRING), 11) AS c2__top,\n  -- store_and_fwd_flag (STRING)\n  COUNTIF(`store_and_fwd_flag` IS NULL) AS c3__missing,\n  APPROX_COUNT_DISTINCT(`store_and_fwd_flag`) AS c3__distinct,\n  MIN(CHAR_LENGTH(`store_and_fwd_flag`)) AS c3__min_length,\n  MAX(CHAR_LENGTH(`store_and_fwd_flag`)) AS c3__max_length,\n  AVG(CHAR_LENGTH(`store_and_fwd_flag`)) AS c3__mean_length,\n  COUNTIF(TRIM(`store_and_fwd_flag`) = '') AS c3__blank,\n  APPROX_TOP_COUNT(CAST(`store_and_fwd_flag` AS STRING), 11) AS c3__top,\n  -- rate_code (STRING)\n  COUNTIF(`rate_code` IS NULL) AS c4__missing,\n  APPROX_COUNT_DISTINCT(`rate_code`) AS c4__distinct,\n  MIN(CHAR_LENGTH(`rate_code`)) AS c4__min_length,\n  MAX(CHAR_LENGTH(`rate_code`)) AS c4__max_length,\n  AVG(CHAR_LENGTH(`rate_code`)) AS c4__mean_length,\n  COUNTIF(TRIM(`rate_code`) = '') AS c4__blank,\n  APPROX_TOP_COUNT(CAST(`rate_code` AS STRING), 11) AS c4__top,\n  -- passenger_count (INTEGER)\n  COUNTIF(`passenger_count` IS NULL) AS c5__missing,\n  APPROX_COUNT_DISTINCT(`passenger_count`) AS c5__distinct,\n  MIN(CAST(`passenger_count` AS FLOAT64)) AS c5__min,\n  MAX(CAST(`passenger_count` AS FLOAT64)) AS c5__max,\n  AVG(CAST(`passenger_count` AS FLOAT64)) AS c5__mean,\n  STDDEV_SAMP(CAST(`passenger_count` AS FLOAT64)) AS c5__std,\n  SUM(CAST(`passenger_count` AS FLOAT64)) AS c5__sum,\n  APPROX_QUANTILES(CAST(`passenger_count` AS FLOAT64), 4) AS c5__quartiles,\n  COUNTIF(CAST(`passenger_count` AS FLOAT64) = 0) AS c5__zeros,\n  COUNTIF(CAST(`passenger_count` AS FLOAT64) < 0) AS c5__negatives,\n  APPROX_TOP_COUNT(CAST(`passenger_count` AS STRING), 11) AS c5__top,\n  -- trip_distance (NUMERIC)\n  COUNTIF(`trip_distance` IS NULL) AS c6__missing,\n  APPROX_COUNT_DISTINCT(`trip_distance`) AS c6__distinct,\n  MIN(CAST(`trip_distance` AS FLOAT64)) AS c6__min,\n  MAX(CAST(`trip_distance` AS FLOAT64)) AS c6__max,\n  AVG(CAST(`trip_distance` AS FLOAT64)) AS c6__mean,\n  STDDEV_SAMP(CAST(`trip_distance` AS FLOAT64)) AS c6__std,\n  SUM(CAST(`trip_distance` AS FLOAT64)) AS c6__sum,\n  APPROX_QUANTILES(CAST(`trip_distance` AS FLOAT64), 4) AS c6__quartiles,\n  COUNTIF(CAST(`trip_distance` AS FLOAT64) = 0) AS c6__zeros,\n  COUNTIF(CAST(`trip_distance` AS FLOAT64) < 0) AS c6__negatives,\n  APPROX_TOP_COUNT(CAST(`trip_distance` AS STRING), 11) AS c6__top,\n  -- fare_amount (NUMERIC)\n  COUNTIF(`fare_amount` IS NULL) AS c7__missing,\n  APPROX_COUNT_DISTINCT(`fare_amount`) AS c7__distinct,\n  MIN(CAST(`fare_amount` AS FLOAT64)) AS c7__min,\n  MAX(CAST(`fare_amount` AS FLOAT64)) AS c7__max,\n  AVG(CAST(`fare_amount` AS FLOAT64)) AS c7__mean,\n  STDDEV_SAMP(CAST(`fare_amount` AS FLOAT64)) AS c7__std,\n  SUM(CAST(`fare_amount` AS FLOAT64)) AS c7__sum,\n  APPROX_QUANTILES(CAST(`fare_amount` AS FLOAT64), 4) AS c7__quartiles,\n  COUNTIF(CAST(`fare_amount` AS FLOAT64) = 0) AS c7__zeros,\n  COUNTIF(CAST(`fare_amount` AS FLOAT64) < 0) AS c7__negatives,\n  APPROX_TOP_COUNT(CAST(`fare_amount` AS STRING), 11) AS c7__top,\n  -- extra (NUMERIC)\n  COUNTIF(`extra` IS NULL) AS c8__missing,\n  APPROX_COUNT_DISTINCT(`extra`) AS c8__distinct,\n  MIN(CAST(`extra` AS FLOAT64)) AS c8__min,\n  MAX(CAST(`extra` AS FLOAT64)) AS c8__max,\n  AVG(CAST(`extra` AS FLOAT64)) AS c8__mean,\n  STDDEV_SAMP(CAST(`extra` AS FLOAT64)) AS c8__std,\n  SUM(CAST(`extra` AS FLOAT64)) AS c8__sum,\n  APPROX_QUANTILES(CAST(`extra` AS FLOAT64), 4) AS c8__quartiles,\n  COUNTIF(CAST(`extra` AS FLOAT64) = 0) AS c8__zeros,\n  COUNTIF(CAST(`extra` AS FLOAT64) < 0) AS c8__negatives,\n  APPROX_TOP_COUNT(CAST(`extra` AS STRING), 11) AS c8__top,\n  -- mta_tax (NUMERIC)\n  COUNTIF(`mta_tax` IS NULL) AS c9__missing,\n  APPROX_COUNT_DISTINCT(`mta_tax`) AS c9__distinct,\n  MIN(CAST(`mta_tax` AS FLOAT64)) AS c9__min,\n  MAX(CAST(`mta_tax` AS FLOAT64)) AS c9__max,\n  AVG(CAST(`mta_tax` AS FLOAT64)) AS c9__mean,\n  STDDEV_SAMP(CAST(`mta_tax` AS FLOAT64)) AS c9__std,\n  SUM(CAST(`mta_tax` AS FLOAT64)) AS c9__sum,\n  APPROX_QUANTILES(CAST(`mta_tax` AS FLOAT64), 4) AS c9__quartiles,\n  COUNTIF(CAST(`mta_tax` AS FLOAT64) = 0) AS c9__zeros,\n  COUNTIF(CAST(`mta_tax` AS FLOAT64) < 0) AS c9__negatives,\n  APPROX_TOP_COUNT(CAST(`mta_tax` AS STRING), 11) AS c9__top,\n  -- tip_amount (NUMERIC)\n  COUNTIF(`tip_amount` IS NULL) AS c10__missing,\n  APPROX_COUNT_DISTINCT(`tip_amount`) AS c10__distinct,\n  MIN(CAST(`tip_amount` AS FLOAT64)) AS c10__min,\n  MAX(CAST(`tip_amount` AS FLOAT64)) AS c10__max,\n  AVG(CAST(`tip_amount` AS FLOAT64)) AS c10__mean,\n  STDDEV_SAMP(CAST(`tip_amount` AS FLOAT64)) AS c10__std,\n  SUM(CAST(`tip_amount` AS FLOAT64)) AS c10__sum,\n  APPROX_QUANTILES(CAST(`tip_amount` AS FLOAT64), 4) AS c10__quartiles,\n  COUNTIF(CAST(`tip_amount` AS FLOAT64) = 0) AS c10__zeros,\n  COUNTIF(CAST(`tip_amount` AS FLOAT64) < 0) AS c10__negatives,\n  APPROX_TOP_COUNT(CAST(`tip_amount` AS STRING), 11) AS c10__top,\n  -- tolls_amount (NUMERIC)\n  COUNTIF(`tolls_amount` IS NULL) AS c11__missing,\n  APPROX_COUNT_DISTINCT(`tolls_amount`) AS c11__distinct,\n  MIN(CAST(`tolls_amount` AS FLOAT64)) AS c11__min,\n  MAX(CAST(`tolls_amount` AS FLOAT64)) AS c11__max,\n  AVG(CAST(`tolls_amount` AS FLOAT64)) AS c11__mean,\n  STDDEV_SAMP(CAST(`tolls_amount` AS FLOAT64)) AS c11__std,\n  SUM(CAST(`tolls_amount` AS FLOAT64)) AS c11__sum,\n  APPROX_QUANTILES(CAST(`tolls_amount` AS FLOAT64), 4) AS c11__quartiles,\n  COUNTIF(CAST(`tolls_amount` AS FLOAT64) = 0) AS c11__zeros,\n  COUNTIF(CAST(`tolls_amount` AS FLOAT64) < 0) AS c11__negatives,\n  APPROX_TOP_COUNT(CAST(`tolls_amount` AS STRING), 11) AS c11__top,\n  -- ehail_fee (NUMERIC)\n  COUNTIF(`ehail_fee` IS NULL) AS c12__missing,\n  APPROX_COUNT_DISTINCT(`ehail_fee`) AS c12__distinct,\n  MIN(CAST(`ehail_fee` AS FLOAT64)) AS c12__min,\n  MAX(CAST(`ehail_fee` AS FLOAT64)) AS c12__max,\n  AVG(CAST(`ehail_fee` AS FLOAT64)) AS c12__mean,\n  STDDEV_SAMP(CAST(`ehail_fee` AS FLOAT64)) AS c12__std,\n  SUM(CAST(`ehail_fee` AS FLOAT64)) AS c12__sum,\n  APPROX_QUANTILES(CAST(`ehail_fee` AS FLOAT64), 4) AS c12__quartiles,\n  COUNTIF(CAST(`ehail_fee` AS FLOAT64) = 0) AS c12__zeros,\n  COUNTIF(CAST(`ehail_fee` AS FLOAT64) < 0) AS c12__negatives,\n  APPROX_TOP_COUNT(CAST(`ehail_fee` AS STRING), 11) AS c12__top,\n  -- airport_fee (NUMERIC)\n  COUNTIF(`airport_fee` IS NULL) AS c13__missing,\n  APPROX_COUNT_DISTINCT(`airport_fee`) AS c13__distinct,\n  MIN(CAST(`airport_fee` AS FLOAT64)) AS c13__min,\n  MAX(CAST(`airport_fee` AS FLOAT64)) AS c13__max,\n  AVG(CAST(`airport_fee` AS FLOAT64)) AS c13__mean,\n  STDDEV_SAMP(CAST(`airport_fee` AS FLOAT64)) AS c13__std,\n  SUM(CAST(`airport_fee` AS FLOAT64)) AS c13__sum,\n  APPROX_QUANTILES(CAST(`airport_fee` AS FLOAT64), 4) AS c13__quartiles,\n  COUNTIF(CAST(`airport_fee` AS FLOAT64) = 0) AS c13__zeros,\n  COUNTIF(CAST(`airport_fee` AS FLOAT64) < 0) AS c13__negatives,\n  APPROX_TOP_COUNT(CAST(`airport_fee` AS STRING), 11) AS c13__top,\n  -- total_amount (NUMERIC)\n  COUNTIF(`total_amount` IS NULL) AS c14__missing,\n  APPROX_COUNT_DISTINCT(`total_amount`) AS c14__distinct,\n  MIN(CAST(`total_amount` AS FLOAT64)) AS c14__min,\n  MAX(CAST(`total_amount` AS FLOAT64)) AS c14__max,\n  AVG(CAST(`total_amount` AS FLOAT64)) AS c14__mean,\n  STDDEV_SAMP(CAST(`total_amount` AS FLOAT64)) AS c14__std,\n  SUM(CAST(`total_amount` AS FLOAT64)) AS c14__sum,\n  APPROX_QUANTILES(CAST(`total_amount` AS FLOAT64), 4) AS c14__quartiles,\n  COUNTIF(CAST(`total_amount` AS FLOAT64) = 0) AS c14__zeros,\n  COUNTIF(CAST(`total_amount` AS FLOAT64) < 0) AS c14__negatives,\n  APPROX_TOP_COUNT(CAST(`total_amount` AS STRING), 11) AS c14__top,\n  -- payment_type (STRING)\n  COUNTIF(`payment_type` IS NULL) AS c15__missing,\n  APPROX_COUNT_DISTINCT(`payment_type`) AS c15__distinct,\n  MIN(CHAR_LENGTH(`payment_type`)) AS c15__min_length,\n  MAX(CHAR_LENGTH(`payment_type`)) AS c15__max_length,\n  AVG(CHAR_LENGTH(`payment_type`)) AS c15__mean_length,\n  COUNTIF(TRIM(`payment_type`) = '') AS c15__blank,\n  APPROX_TOP_COUNT(CAST(`payment_type` AS STRING), 11) AS c15__top,\n  -- distance_between_service (NUMERIC)\n  COUNTIF(`distance_between_service` IS NULL) AS c16__missing,\n  APPROX_COUNT_DISTINCT(`distance_between_service`) AS c16__distinct,\n  MIN(CAST(`distance_between_service` AS FLOAT64)) AS c16__min,\n  MAX(CAST(`distance_between_service` AS FLOAT64)) AS c16__max,\n  AVG(CAST(`distance_between_service` AS FLOAT64)) AS c16__mean,\n  STDDEV_SAMP(CAST(`distance_between_service` AS FLOAT64)) AS c16__std,\n  SUM(CAST(`distance_between_service` AS FLOAT64)) AS c16__sum,\n  APPROX_QUANTILES(CAST(`distance_between_service` AS FLOAT64), 4) AS c16__quartiles,\n  COUNTIF(CAST(`distance_between_service` AS FLOAT64) = 0) AS c16__zeros,\n  COUNTIF(CAST(`distance_between_service` AS FLOAT64) < 0) AS c16__negatives,\n  APPROX_TOP_COUNT(CAST(`distance_between_service` AS STRING), 11) AS c16__top,\n  -- time_between_service (INTEGER)\n  COUNTIF(`time_between_service` IS NULL) AS c17__missing,\n  APPROX_COUNT_DISTINCT(`time_between_service`) AS c17__distinct,\n  MIN(CAST(`time_between_service` AS FLOAT64)) AS c17__min,\n  MAX(CAST(`time_between_service` AS FLOAT64)) AS c17__max,\n  AVG(CAST(`time_between_service` AS FLOAT64)) AS c17__mean,\n  STDDEV_SAMP(CAST(`time_between_service` AS FLOAT64)) AS c17__std,\n  SUM(CAST(`time_between_service` AS FLOAT64)) AS c17__sum,\n  APPROX_QUANTILES(CAST(`time_between_service` AS FLOAT64), 4) AS c17__quartiles,\n  COUNTIF(CAST(`time_between_service` AS FLOAT64) = 0) AS c17__zeros,\n  COUNTIF(CAST(`time_between_service` AS FLOAT64) < 0) AS c17__negatives,\n  APPROX_TOP_COUNT(CAST(`time_between_service` AS STRING), 11) AS c17__top,\n  -- trip_type (STRING)\n  COUNTIF(`trip_type` IS NULL) AS c18__missing,\n  APPROX_COUNT_DISTINCT(`trip_type`) AS c18__distinct,\n  MIN(CHAR_LENGTH(`trip_type`)) AS c18__min_length,\n  MAX(CHAR_LENGTH(`trip_type`)) AS c18__max_length,\n  AVG(CHAR_LENGTH(`trip_type`)) AS c18__mean_length,\n  COUNTIF(TRIM(`trip_type`) = '') AS c18__blank,\n  APPROX_TOP_COUNT(CAST(`trip_type` AS STRING), 11) AS c18__top,\n  -- imp_surcharge (NUMERIC)\n  COUNTIF(`imp_surcharge` IS NULL) AS c19__missing,\n  APPROX_COUNT_DISTINCT(`imp_surcharge`) AS c19__distinct,\n  MIN(CAST(`imp_surcharge` AS FLOAT64)) AS c19__min,\n  MAX(CAST(`imp_surcharge` AS FLOAT64)) AS c19__max,\n  AVG(CAST(`imp_surcharge` AS FLOAT64)) AS c19__mean,\n  STDDEV_SAMP(CAST(`imp_surcharge` AS FLOAT64)) AS c19__std,\n  SUM(CAST(`imp_surcharge` AS FLOAT64)) AS c19__sum,\n  APPROX_QUANTILES(CAST(`imp_surcharge` AS FLOAT64), 4) AS c19__quartiles,\n  COUNTIF(CAST(`imp_surcharge` AS FLOAT64) = 0) AS c19__zeros,\n  COUNTIF(CAST(`imp_surcharge` AS FLOAT64) < 0) AS c19__negatives,\n  APPROX_TOP_COUNT(CAST(`imp_surcharge` AS STRING), 11) AS c19__top,\n  -- pickup_location_id (STRING)\n  COUNTIF(`pickup_location_id` IS NULL) AS c20__missing,\n  APPROX_COUNT_DISTINCT(`pickup_location_id`) AS c20__distinct,\n  MIN(CHAR_LENGTH(`pickup_location_id`)) AS c20__min_length,\n  MAX(CHAR_LENGTH(`pickup_location_id`)) AS c20__max_length,\n  AVG(CHAR_LENGTH(`pickup_location_id`)) AS c20__mean_length,\n  COUNTIF(TRIM(`pickup_location_id`) = '') AS c20__blank,\n  APPROX_TOP_COUNT(CAST(`pickup_location_id` AS STRING), 11) AS c20__top,\n  -- dropoff_location_id (STRING)\n  COUNTIF(`dropoff_location_id` IS NULL) AS c21__missing,\n  APPROX_COUNT_DISTINCT(`dropoff_location_id`) AS c21__distinct,\n  MIN(CHAR_LENGTH(`dropoff_location_id`)) AS c21__min_length,\n  MAX(CHAR_LENGTH(`dropoff_location_id`)) AS c21__max_length,\n  AVG(CHAR_LENGTH(`dropoff_location_id`)) AS c21__mean_length,\n  COUNTIF(TRIM(`dropoff_location_id`) = '') AS c21__blank,\n  APPROX_TOP_COUNT(CAST(`dropoff_location_id` AS STRING), 11) AS c21__top,\n  -- data_file_year (INTEGER)\n  COUNTIF(`data_file_year` IS NULL) AS c22__missing,\n  APPROX_COUNT_DISTINCT(`data_file_year`) AS c22__distinct,\n  MIN(CAST(`data_file_year` AS FLOAT64)) AS c22__min,\n  MAX(CAST(`data_file_year` AS FLOAT64)) AS c22__max,\n  AVG(CAST(`data_file_year` AS FLOAT64)) AS c22__mean,\n  STDDEV_SAMP(CAST(`data_file_year` AS FLOAT64)) AS c22__std,\n  SUM(CAST(`data_file_year` AS FLOAT64)) AS c22__sum,\n  APPROX_QUANTILES(CAST(`data_file_year` AS FLOAT64), 4) AS c22__quartiles,\n  COUNTIF(CAST(`data_file_year` AS FLOAT64) = 0) AS c22__zeros,\n  COUNTIF(CAST(`data_file_year` AS FLOAT64) < 0) AS c22__negatives,\n  APPROX_TOP_COUNT(CAST(`data_file_year` AS STRING), 11) AS c22__top,\n  -- data_file_month (INTEGER)\n  COUNTIF(`data_file_month` IS NULL) AS c23__missing,\n  APPROX_COUNT_DISTINCT(`data_file_month`) AS c23__distinct,\n  MIN(CAST(`data_file_month` AS FLOAT64)) AS c23__min,\n  MAX(CAST(`data_file_month` AS FLOAT64)) AS c23__max,\n  AVG(CAST(`data_file_month` AS FLOAT64)) AS c23__mean,\n  STDDEV_SAMP(CAST(`data_file_month` AS FLOAT64)) AS c23__std,\n  SUM(CAST(`data_file_month` AS FLOAT64)) AS c23__sum,\n  APPROX_QUANTILES(CAST(`data_file_month` AS FLOAT64), 4) AS c23__quartiles,\n  COUNTIF(CAST(`data_file_month` AS FLOAT64) = 0) AS c23__zeros,\n  COUNTIF(CAST(`data_file_month` AS FLOAT64) < 0) AS c23__negatives,\n  APPROX_TOP_COUNT(CAST(`data_file_month` AS STRING), 11) AS c23__top,\n  -- correlations between numeric columns\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`trip_distance` AS FLOAT64)) AS corr__5__6,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`fare_amount` AS FLOAT64)) AS corr__5__7,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`extra` AS FLOAT64)) AS corr__5__8,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`mta_tax` AS FLOAT64)) AS corr__5__9,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`tip_amount` AS FLOAT64)) AS corr__5__10,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`tolls_amount` AS FLOAT64)) AS corr__5__11,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`ehail_fee` AS FLOAT64)) AS corr__5__12,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__5__13,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__5__14,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__5__16,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__5__17,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__5__19,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__5__22,\n  CORR(CAST(`passenger_count` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__5__23,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`fare_amount` AS FLOAT64)) AS corr__6__7,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`extra` AS FLOAT64)) AS corr__6__8,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`mta_tax` AS FLOAT64)) AS corr__6__9,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`tip_amount` AS FLOAT64)) AS corr__6__10,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`tolls_amount` AS FLOAT64)) AS corr__6__11,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`ehail_fee` AS FLOAT64)) AS corr__6__12,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__6__13,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__6__14,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__6__16,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__6__17,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__6__19,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__6__22,\n  CORR(CAST(`trip_distance` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__6__23,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`extra` AS FLOAT64)) AS corr__7__8,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`mta_tax` AS FLOAT64)) AS corr__7__9,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`tip_amount` AS FLOAT64)) AS corr__7__10,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`tolls_amount` AS FLOAT64)) AS corr__7__11,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`ehail_fee` AS FLOAT64)) AS corr__7__12,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__7__13,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__7__14,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__7__16,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__7__17,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__7__19,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__7__22,\n  CORR(CAST(`fare_amount` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__7__23,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`mta_tax` AS FLOAT64)) AS corr__8__9,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`tip_amount` AS FLOAT64)) AS corr__8__10,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`tolls_amount` AS FLOAT64)) AS corr__8__11,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`ehail_fee` AS FLOAT64)) AS corr__8__12,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__8__13,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__8__14,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__8__16,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__8__17,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__8__19,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__8__22,\n  CORR(CAST(`extra` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__8__23,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`tip_amount` AS FLOAT64)) AS corr__9__10,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`tolls_amount` AS FLOAT64)) AS corr__9__11,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`ehail_fee` AS FLOAT64)) AS corr__9__12,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__9__13,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__9__14,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__9__16,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__9__17,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__9__19,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__9__22,\n  CORR(CAST(`mta_tax` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__9__23,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`tolls_amount` AS FLOAT64)) AS corr__10__11,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`ehail_fee` AS FLOAT64)) AS corr__10__12,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__10__13,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__10__14,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__10__16,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__10__17,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__10__19,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__10__22,\n  CORR(CAST(`tip_amount` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__10__23,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`ehail_fee` AS FLOAT64)) AS corr__11__12,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__11__13,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__11__14,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__11__16,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__11__17,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__11__19,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__11__22,\n  CORR(CAST(`tolls_amount` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__11__23,\n  CORR(CAST(`ehail_fee` AS FLOAT64), CAST(`airport_fee` AS FLOAT64)) AS corr__12__13,\n  CORR(CAST(`ehail_fee` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__12__14,\n  CORR(CAST(`ehail_fee` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__12__16,\n  CORR(CAST(`ehail_fee` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__12__17,\n  CORR(CAST(`ehail_fee` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__12__19,\n  CORR(CAST(`ehail_fee` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__12__22,\n  CORR(CAST(`ehail_fee` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__12__23,\n  CORR(CAST(`airport_fee` AS FLOAT64), CAST(`total_amount` AS FLOAT64)) AS corr__13__14,\n  CORR(CAST(`airport_fee` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__13__16,\n  CORR(CAST(`airport_fee` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__13__17,\n  CORR(CAST(`airport_fee` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__13__19,\n  CORR(CAST(`airport_fee` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__13__22,\n  CORR(CAST(`airport_fee` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__13__23,\n  CORR(CAST(`total_amount` AS FLOAT64), CAST(`distance_between_service` AS FLOAT64)) AS corr__14__16,\n  CORR(CAST(`total_amount` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__14__17,\n  CORR(CAST(`total_amount` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__14__19,\n  CORR(CAST(`total_amount` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__14__22,\n  CORR(CAST(`total_amount` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__14__23,\n  CORR(CAST(`distance_between_service` AS FLOAT64), CAST(`time_between_service` AS FLOAT64)) AS corr__16__17,\n  CORR(CAST(`distance_between_service` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__16__19,\n  CORR(CAST(`distance_between_service` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__16__22,\n  CORR(CAST(`distance_between_service` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__16__23,\n  CORR(CAST(`time_between_service` AS FLOAT64), CAST(`imp_surcharge` AS FLOAT64)) AS corr__17__19,\n  CORR(CAST(`time_between_service` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__17__22,\n  CORR(CAST(`time_between_service` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__17__23,\n  CORR(CAST(`imp_surcharge` AS FLOAT64), CAST(`data_file_year` AS FLOAT64)) AS corr__19__22,\n  CORR(CAST(`imp_surcharge` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__19__23,\n  CORR(CAST(`data_file_year` AS FLOAT64), CAST(`data_file_month` AS FLOAT64)) AS corr__22__23\nFROM (\nSELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_green_trips_2022` TABLESAMPLE SYSTEM (1 PERCENT) LIMIT 1000\n) AS _datascope_src", "SELECT\n  COUNT(DISTINCT `pickup_datetime`) AS c1__distinct,\n  COUNT(DISTINCT `dropoff_datetime`) AS c2__distinct\nFROM (\nSELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_green_trips_2022` TABLESAMPLE SYSTEM (1 PERCENT) LIMIT 1000\n) AS _datascope_src"], "bytes_processed": 40519076, "bytes_processed_by_section": {"profiling": 40519076}, "usage_by_section": {"profiling": {"queries": 2, "bytes_processed": 40519076, "slot_ms": 438, "shuffle_bytes": 123326}}, "distinct_counts": "keys", "exact_distinct_columns": ["dropoff_datetime", "pickup_datetime"], "skipped_columns": [], "datascope_version": "1.1.0", "settings": {"top_n_values": 10, "histogram_bins": 30, "sample_size_for_content_checks": 1000, "random_state": 42, "sensitive_min_match_pct": 1.0, "missing_warning_pct": 20.0, "missing_high_pct": 50.0, "outlier_alert_pct": 5.0, "sensitive_alert_min_confidence": 0.0, "correlations": true, "max_correlation_cols": 30, "high_correlation_threshold": 0.8, "max_pk_candidate_pool": 10, "max_pk_combo_size": 3, "max_duplicate_column_check": 100, "functional_dependencies": true, "fd_min_purity": 0.98, "fd_min_support_rows": 20, "max_fd_candidate_pool": 25, "suggested_references": "auto", "max_reference_suggestions": 10, "ri_parent_min_unique_pct": 99.0, "ri_suggest_min_match_pct": 90.0, "ri_suggest_min_rows": 10, "ri_suggest_min_distinct": 3, "ri_sample_orphans": 5, "ri_high_orphan_pct": 5.0, "distinct_counts": "keys", "max_columns_per_query": 100}, "checks": [{"id": "column_stats", "name": "Column statistics", "status": "ran", "detail": "24 columns: nulls, distinct counts, top values, numeric/text/date stats.", "changes": {}, "flags": [], "hint": null}, {"id": "pii", "name": "Personal & sensitive data detection", "status": "not_available", "detail": "Column names only: checking values would mean pulling them out of the warehouse.", "changes": {}, "flags": [], "hint": null}, {"id": "histograms", "name": "Histograms and outliers", "status": "not_available", "detail": "Not available on the BigQuery engine yet (needs an extra pass).", "changes": {}, "flags": [], "hint": null}, {"id": "duplicate_rows", "name": "Duplicate rows", "status": "not_available", "detail": "Not available on the BigQuery engine yet (needs an extra pass).", "changes": {}, "flags": [], "hint": null}, {"id": "duplicate_columns", "name": "Identical columns", "status": "not_available", "detail": "Not available on the BigQuery engine.", "changes": {}, "flags": [], "hint": null}, {"id": "correlations", "name": "Correlations", "status": "ran", "detail": "All 15 numeric columns (105 pairs).", "changes": {}, "flags": [], "hint": null}, {"id": "missing_correlation", "name": "Missing-value correlation", "status": "not_available", "detail": "Not available on the BigQuery engine.", "changes": {}, "flags": [], "hint": null}, {"id": "pk", "name": "Primary-key search", "status": "ran", "detail": "Single-column keys: approximate distinct counts first, then exact counts for the 2 columns that could be a key. Composite keys are not available on this engine.", "changes": {}, "flags": [], "hint": null}, {"id": "fd", "name": "Functional dependencies", "status": "not_available", "detail": "Not available on the BigQuery engine.", "changes": {}, "flags": [], "hint": null}, {"id": "ri_declared", "name": "Referential integrity (declared)", "status": "not_configured", "detail": "None declared.", "changes": {}, "flags": [], "hint": "--reference CHILD=PARENT (repeatable); PARENT is a column of this table or PROJECT.DATASET.TABLE.COLUMN"}, {"id": "ri_suggested", "name": "Referential integrity (suggested)", "status": "nothing_to_check", "detail": "No column's name and data point at an identifier column in this table.", "changes": {}, "flags": [], "hint": null}], "command": {"argv": ["datascope", "--bq-query", "SELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_green_trips_2022` TABLESAMPLE SYSTEM (1 PERCENT) LIMIT 1000", "--bq-project", "datalight-336617", "--bq-location", "US", "--max-bytes-billed", "10000000000"], "text": "datascope --bq-query 'SELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_green_trips_2022` TABLESAMPLE SYSTEM (1 PERCENT) LIMIT 1000' --bq-project datalight-336617 --bq-location US --max-bytes-billed 10000000000", "complete": true}, "extend_command": null}, "overview": {"type_distribution": {"binary_categorical": 2, "datetime": 2, "boolean": 1, "categorical": 2, "discrete_numeric_categorical": 6, "continuous_numeric": 3, "empty": 4, "high_cardinality_text": 2, "constant": 2}, "total_missing_cells": 5165, "total_missing_pct": 21.521, "sensitive_columns_count": 0, "alerts": [{"severity": "info", "column": null, "message": "'fare_amount' and 'total_amount' are highly correlated (r=0.964)."}, {"severity": "warning", "column": "store_and_fwd_flag", "message": "23.3% missing values."}, {"severity": "warning", "column": "rate_code", "message": "23.3% missing values."}, {"severity": "warning", "column": "passenger_count", "message": "23.3% missing values."}, {"severity": "high", "column": "ehail_fee", "message": "100.0% missing values."}, {"severity": "high", "column": "airport_fee", "message": "100.0% missing values."}, {"severity": "warning", "column": "payment_type", "message": "23.3% missing values."}, {"severity": "high", "column": "distance_between_service", "message": "100.0% missing values."}, {"severity": "high", "column": "time_between_service", "message": "100.0% missing values."}, {"severity": "warning", "column": "trip_type", "message": "23.3% missing values."}, {"severity": "info", "column": "pickup_location_id", "message": "High cardinality \u2014 verify categorical vs. identifier vs. free text."}, {"severity": "info", "column": "dropoff_location_id", "message": "High cardinality \u2014 verify categorical vs. identifier vs. free text."}, {"severity": "warning", "column": "data_file_year", "message": "Single distinct value \u2014 consider dropping."}, {"severity": "warning", "column": "data_file_month", "message": "Single distinct value \u2014 consider dropping."}]}, "columns": [{"name": "vendor_id", "dtype": "STRING", "semantic_type": "binary_categorical", "semantic_type_confidence": 0.85, "semantic_notes": ["Exactly two distinct values.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 2, "unique_pct": 0.2, "memory_bytes": null, "numeric_stats": null, "string_stats": {"min_length": 1, "max_length": 1, "mean_length": 1.0, "empty_or_whitespace": 0}, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "2", "count": 868, "pct": 86.8}, {"value": "1", "count": 132, "pct": 13.2}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "accepted_values", "severity": "suggested", "values": ["2", "1"], "description": "Restrict to the 2 observed value(s), covering 100.0% of rows."}], "dbt_snippet": "- name: vendor_id\n  tests:\n    - not_null\n    - accepted_values:\n        values: ['2', '1']"}, {"name": "pickup_datetime", "dtype": "TIMESTAMP", "semantic_type": "datetime", "semantic_type_confidence": 0.95, "semantic_notes": [], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 994, "unique_pct": 99.4, "memory_bytes": null, "numeric_stats": null, "string_stats": null, "datetime_stats": {"min_date": "2009-01-01T00:05:35+00:00", "max_date": "2022-11-30T23:58:52+00:00", "range_days": 5081, "weekday_distribution": {"Sunday": 93, "Monday": 154, "Tuesday": 165, "Wednesday": 183, "Thursday": 144, "Friday": 138, "Saturday": 123}, "future_dates": 0}, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "2022-11-25 16:44:42+00", "count": 2, "pct": 0.2}, {"value": "2022-11-21 15:05:03+00", "count": 2, "pct": 0.2}, {"value": "2022-11-21 14:37:43+00", "count": 2, "pct": 0.2}, {"value": "2022-11-17 16:55:51+00", "count": 2, "pct": 0.2}, {"value": "2022-11-15 21:10:00+00", "count": 2, "pct": 0.2}, {"value": "2022-11-15 20:26:35+00", "count": 2, "pct": 0.2}, {"value": "2022-11-30 23:58:52+00", "count": 1, "pct": 0.1}, {"value": "2022-11-30 21:20:09+00", "count": 1, "pct": 0.1}, {"value": "2022-11-30 20:45:21+00", "count": 1, "pct": 0.1}, {"value": "2022-11-30 20:13:43+00", "count": 1, "pct": 0.1}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}], "dbt_snippet": "- name: pickup_datetime\n  tests:\n    - not_null"}, {"name": "dropoff_datetime", "dtype": "TIMESTAMP", "semantic_type": "datetime", "semantic_type_confidence": 0.95, "semantic_notes": [], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 994, "unique_pct": 99.4, "memory_bytes": null, "numeric_stats": null, "string_stats": null, "datetime_stats": {"min_date": "2009-01-01T13:03:53+00:00", "max_date": "2022-12-01T07:55:13+00:00", "range_days": 5082, "weekday_distribution": {"Sunday": 96, "Monday": 152, "Tuesday": 167, "Wednesday": 179, "Thursday": 145, "Friday": 139, "Saturday": 122}, "future_dates": 0}, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "2022-11-25 16:46:20+00", "count": 2, "pct": 0.2}, {"value": "2022-11-21 15:05:14+00", "count": 2, "pct": 0.2}, {"value": "2022-11-21 14:40:55+00", "count": 2, "pct": 0.2}, {"value": "2022-11-17 16:56:03+00", "count": 2, "pct": 0.2}, {"value": "2022-11-15 20:27:15+00", "count": 2, "pct": 0.2}, {"value": "2022-11-15 14:29:00+00", "count": 2, "pct": 0.2}, {"value": "2022-12-01 07:55:13+00", "count": 1, "pct": 0.1}, {"value": "2022-12-01 07:53:31+00", "count": 1, "pct": 0.1}, {"value": "2022-12-01 00:17:13+00", "count": 1, "pct": 0.1}, {"value": "2022-11-30 21:21:58+00", "count": 1, "pct": 0.1}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}], "dbt_snippet": "- name: dropoff_datetime\n  tests:\n    - not_null"}, {"name": "store_and_fwd_flag", "dtype": "STRING", "semantic_type": "boolean", "semantic_type_confidence": 0.9, "semantic_notes": ["Two distinct values resembling True/False.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 233, "missing_pct": 23.3, "unique": 2, "unique_pct": 0.261, "memory_bytes": null, "numeric_stats": null, "string_stats": {"min_length": 1, "max_length": 1, "mean_length": 1.0, "empty_or_whitespace": 0}, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "N", "count": 760, "pct": 76.0}, {"value": "Y", "count": 7, "pct": 0.7}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "rate_code", "dtype": "STRING", "semantic_type": "categorical", "semantic_type_confidence": 0.85, "semantic_notes": ["Only 4 distinct values.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 233, "missing_pct": 23.3, "unique": 4, "unique_pct": 0.522, "memory_bytes": null, "numeric_stats": null, "string_stats": {"min_length": 3, "max_length": 3, "mean_length": 3.0, "empty_or_whitespace": 0}, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "1.0", "count": 673, "pct": 67.3}, {"value": "5.0", "count": 88, "pct": 8.8}, {"value": "4.0", "count": 4, "pct": 0.4}, {"value": "2.0", "count": 2, "pct": 0.2}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "passenger_count", "dtype": "INTEGER", "semantic_type": "discrete_numeric_categorical", "semantic_type_confidence": 0.7, "semantic_notes": ["Low cardinality numeric \u2014 may represent a code or category rather than a measure.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 233, "missing_pct": 23.3, "unique": 7, "unique_pct": 0.913, "memory_bytes": null, "numeric_stats": {"mean": 1.25163, "std": 0.858406, "min": 0.0, "q1": 1.0, "median": 1.0, "q3": 1.0, "max": 6.0, "range": 6.0, "sum": 960.0, "zeros": 8, "zeros_pct": 1.04, "negatives": 0, "negatives_pct": 0.0, "skewness": null, "kurtosis": null, "is_integer_like": true, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "1", "count": 658, "pct": 65.8}, {"value": "2", "count": 60, "pct": 6.0}, {"value": "3", "count": 15, "pct": 1.5}, {"value": "5", "count": 13, "pct": 1.3}, {"value": "6", "count": 10, "pct": 1.0}, {"value": "0", "count": 8, "pct": 0.8}, {"value": "4", "count": 3, "pct": 0.3}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "range_check", "severity": "suggested", "description": "Observed range is 0.0 to 6.0 \u2014 consider a bounds check."}], "dbt_snippet": "- name: passenger_count\n  tests:\n    - dbt_utils.accepted_range:\n        min_value: 0.0\n        max_value: 6.0"}, {"name": "trip_distance", "dtype": "NUMERIC", "semantic_type": "continuous_numeric", "semantic_type_confidence": 0.7, "semantic_notes": ["Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 474, "unique_pct": 47.4, "memory_bytes": null, "numeric_stats": {"mean": 3.45725, "std": 3.335319, "min": 0.0, "q1": 1.12, "median": 3.37, "q3": 4.55, "max": 29.9, "range": 29.9, "sum": 3457.25, "zeros": 145, "zeros_pct": 14.5, "negatives": 0, "negatives_pct": 0.0, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "0", "count": 145, "pct": 14.5}, {"value": "1", "count": 8, "pct": 0.8}, {"value": "0.95", "count": 8, "pct": 0.8}, {"value": "4.6", "count": 7, "pct": 0.7}, {"value": "3.74", "count": 7, "pct": 0.7}, {"value": "3.7", "count": 7, "pct": 0.7}, {"value": "3.6", "count": 7, "pct": 0.7}, {"value": "3.9", "count": 6, "pct": 0.6}, {"value": "3.8", "count": 6, "pct": 0.6}, {"value": "3.38", "count": 6, "pct": 0.6}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is 0.0 to 29.9 \u2014 consider a bounds check."}], "dbt_snippet": "- name: trip_distance\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: 0.0\n        max_value: 29.9"}, {"name": "fare_amount", "dtype": "NUMERIC", "semantic_type": "discrete_numeric_categorical", "semantic_type_confidence": 0.7, "semantic_notes": ["Low cardinality numeric \u2014 may represent a code or category rather than a measure.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 46, "unique_pct": 4.6, "memory_bytes": null, "numeric_stats": {"mean": 15.90893, "std": 12.754842, "min": -0.5, "q1": 9.9, "median": 16.5, "q3": 16.5, "max": 90.0, "range": 90.5, "sum": 15908.93, "zeros": 106, "zeros_pct": 10.6, "negatives": 4, "negatives_pct": 0.4, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "16.5", "count": 517, "pct": 51.7}, {"value": "9.9", "count": 175, "pct": 17.5}, {"value": "0", "count": 106, "pct": 10.6}, {"value": "35.5", "count": 58, "pct": 5.8}, {"value": "32.2", "count": 21, "pct": 2.1}, {"value": "8.08", "count": 14, "pct": 1.4}, {"value": "0.01", "count": 13, "pct": 1.3}, {"value": "90", "count": 12, "pct": 1.2}, {"value": "54.5", "count": 10, "pct": 1.0}, {"value": "2", "count": 6, "pct": 0.6}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is -0.5 to 90.0 \u2014 consider a bounds check."}, {"type": "non_negative_check", "severity": "warning", "description": "Column name suggests non-negative values, but 4 negative value(s) found."}], "dbt_snippet": "- name: fare_amount\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: -0.5\n        max_value: 90.0"}, {"name": "extra", "dtype": "NUMERIC", "semantic_type": "discrete_numeric_categorical", "semantic_type_confidence": 0.7, "semantic_notes": ["Low cardinality numeric \u2014 may represent a code or category rather than a measure.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 6, "unique_pct": 0.6, "memory_bytes": null, "numeric_stats": {"mean": 0.25375, "std": 0.579231, "min": 0.0, "q1": 0.0, "median": 0.0, "q3": 0.5, "max": 3.75, "range": 3.75, "sum": 253.75, "zeros": 743, "zeros_pct": 74.3, "negatives": 0, "negatives_pct": 0.0, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "0", "count": 743, "pct": 74.3}, {"value": "1", "count": 118, "pct": 11.8}, {"value": "0.5", "count": 114, "pct": 11.4}, {"value": "2.75", "count": 13, "pct": 1.3}, {"value": "3.75", "count": 8, "pct": 0.8}, {"value": "3.25", "count": 4, "pct": 0.4}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "accepted_values", "severity": "suggested", "values": ["0", "1", "0.5", "2.75", "3.75", "3.25"], "description": "Restrict to the 6 observed value(s), covering 100.0% of rows."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is 0.0 to 3.75 \u2014 consider a bounds check."}], "dbt_snippet": "- name: extra\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: 0.0\n        max_value: 3.75"}, {"name": "mta_tax", "dtype": "NUMERIC", "semantic_type": "discrete_numeric_categorical", "semantic_type_confidence": 0.7, "semantic_notes": ["Low cardinality numeric \u2014 may represent a code or category rather than a measure.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 3, "unique_pct": 0.3, "memory_bytes": null, "numeric_stats": {"mean": 0.3035, "std": 0.245353, "min": -0.5, "q1": 0.0, "median": 0.5, "q3": 0.5, "max": 0.5, "range": 1.0, "sum": 303.5, "zeros": 391, "zeros_pct": 39.1, "negatives": 1, "negatives_pct": 0.1, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "0.5", "count": 608, "pct": 60.8}, {"value": "0", "count": 391, "pct": 39.1}, {"value": "-0.5", "count": 1, "pct": 0.1}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "accepted_values", "severity": "suggested", "values": ["0.5", "0", "-0.5"], "description": "Restrict to the 3 observed value(s), covering 100.0% of rows."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is -0.5 to 0.5 \u2014 consider a bounds check."}], "dbt_snippet": "- name: mta_tax\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: -0.5\n        max_value: 0.5"}, {"name": "tip_amount", "dtype": "NUMERIC", "semantic_type": "continuous_numeric", "semantic_type_confidence": 0.7, "semantic_notes": ["Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 120, "unique_pct": 12.0, "memory_bytes": null, "numeric_stats": {"mean": 2.31091, "std": 3.064968, "min": 0.0, "q1": 0.0, "median": 2.37, "q3": 3.61, "max": 45.0, "range": 45.0, "sum": 2310.91, "zeros": 376, "zeros_pct": 37.6, "negatives": 0, "negatives_pct": 0.0, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "0", "count": 376, "pct": 37.6}, {"value": "2.37", "count": 123, "pct": 12.3}, {"value": "4.01", "count": 58, "pct": 5.8}, {"value": "3.46", "count": 49, "pct": 4.9}, {"value": "2", "count": 36, "pct": 3.6}, {"value": "1", "count": 29, "pct": 2.9}, {"value": "4.21", "count": 18, "pct": 1.8}, {"value": "3.66", "count": 17, "pct": 1.7}, {"value": "4.32", "count": 15, "pct": 1.5}, {"value": "4.11", "count": 15, "pct": 1.5}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is 0.0 to 45.0 \u2014 consider a bounds check."}], "dbt_snippet": "- name: tip_amount\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: 0.0\n        max_value: 45.0"}, {"name": "tolls_amount", "dtype": "NUMERIC", "semantic_type": "discrete_numeric_categorical", "semantic_type_confidence": 0.7, "semantic_notes": ["Low cardinality numeric \u2014 may represent a code or category rather than a measure.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 5, "unique_pct": 0.5, "memory_bytes": null, "numeric_stats": {"mean": 0.22725, "std": 1.23167, "min": 0.0, "q1": 0.0, "median": 0.0, "q3": 0.0, "max": 13.75, "range": 13.75, "sum": 227.25, "zeros": 965, "zeros_pct": 96.5, "negatives": 0, "negatives_pct": 0.0, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "0", "count": 965, "pct": 96.5}, {"value": "6.55", "count": 30, "pct": 3.0}, {"value": "3", "count": 3, "pct": 0.3}, {"value": "8", "count": 1, "pct": 0.1}, {"value": "13.75", "count": 1, "pct": 0.1}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "accepted_values", "severity": "suggested", "values": ["0", "6.55", "3", "8", "13.75"], "description": "Restrict to the 5 observed value(s), covering 100.0% of rows."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is 0.0 to 13.75 \u2014 consider a bounds check."}], "dbt_snippet": "- name: tolls_amount\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: 0.0\n        max_value: 13.75"}, {"name": "ehail_fee", "dtype": "NUMERIC", "semantic_type": "empty", "semantic_type_confidence": 1.0, "semantic_notes": ["Column is entirely null.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 1000, "missing_pct": 100.0, "unique": 0, "unique_pct": 0.0, "memory_bytes": null, "numeric_stats": {}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "airport_fee", "dtype": "NUMERIC", "semantic_type": "empty", "semantic_type_confidence": 1.0, "semantic_notes": ["Column is entirely null.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 1000, "missing_pct": 100.0, "unique": 0, "unique_pct": 0.0, "memory_bytes": null, "numeric_stats": {}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "total_amount", "dtype": "NUMERIC", "semantic_type": "continuous_numeric", "semantic_type_confidence": 0.7, "semantic_notes": ["Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 191, "unique_pct": 19.1, "memory_bytes": null, "numeric_stats": {"mean": 19.97254, "std": 14.307712, "min": -0.8, "q1": 12.57, "median": 19.3, "q3": 24.06, "max": 112.88, "range": 113.68, "sum": 19972.54, "zeros": 93, "zeros_pct": 9.3, "negatives": 5, "negatives_pct": 0.5, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "12.57", "count": 123, "pct": 12.3}, {"value": "0", "count": 93, "pct": 9.3}, {"value": "17.3", "count": 71, "pct": 7.1}, {"value": "24.06", "count": 58, "pct": 5.8}, {"value": "20.76", "count": 49, "pct": 4.9}, {"value": "18.3", "count": 42, "pct": 4.2}, {"value": "17.8", "count": 27, "pct": 2.7}, {"value": "22.05", "count": 25, "pct": 2.5}, {"value": "21.05", "count": 25, "pct": 2.5}, {"value": "25.26", "count": 18, "pct": 1.8}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is -0.8 to 112.88 \u2014 consider a bounds check."}, {"type": "non_negative_check", "severity": "warning", "description": "Column name suggests non-negative values, but 5 negative value(s) found."}], "dbt_snippet": "- name: total_amount\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: -0.8\n        max_value: 112.88"}, {"name": "payment_type", "dtype": "STRING", "semantic_type": "categorical", "semantic_type_confidence": 0.85, "semantic_notes": ["Only 4 distinct values.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 233, "missing_pct": 23.3, "unique": 4, "unique_pct": 0.522, "memory_bytes": null, "numeric_stats": null, "string_stats": {"min_length": 3, "max_length": 3, "mean_length": 3.0, "empty_or_whitespace": 0}, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "1.0", "count": 520, "pct": 52.0}, {"value": "2.0", "count": 215, "pct": 21.5}, {"value": "3.0", "count": 27, "pct": 2.7}, {"value": "4.0", "count": 5, "pct": 0.5}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "distance_between_service", "dtype": "NUMERIC", "semantic_type": "empty", "semantic_type_confidence": 1.0, "semantic_notes": ["Column is entirely null.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 1000, "missing_pct": 100.0, "unique": 0, "unique_pct": 0.0, "memory_bytes": null, "numeric_stats": {}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "time_between_service", "dtype": "INTEGER", "semantic_type": "empty", "semantic_type_confidence": 1.0, "semantic_notes": ["Column is entirely null.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 1000, "missing_pct": 100.0, "unique": 0, "unique_pct": 0.0, "memory_bytes": null, "numeric_stats": {}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "trip_type", "dtype": "STRING", "semantic_type": "binary_categorical", "semantic_type_confidence": 0.85, "semantic_notes": ["Exactly two distinct values.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 233, "missing_pct": 23.3, "unique": 2, "unique_pct": 0.261, "memory_bytes": null, "numeric_stats": null, "string_stats": {"min_length": 3, "max_length": 3, "mean_length": 3.0, "empty_or_whitespace": 0}, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "1.0", "count": 698, "pct": 69.8}, {"value": "2.0", "count": 69, "pct": 6.9}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [], "dbt_snippet": null}, {"name": "imp_surcharge", "dtype": "NUMERIC", "semantic_type": "discrete_numeric_categorical", "semantic_type_confidence": 0.7, "semantic_notes": ["Low cardinality numeric \u2014 may represent a code or category rather than a measure.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 3, "unique_pct": 0.3, "memory_bytes": null, "numeric_stats": {"mean": 0.2652, "std": 0.100693, "min": -0.3, "q1": 0.3, "median": 0.3, "q3": 0.3, "max": 0.3, "range": 0.6, "sum": 265.2, "zeros": 106, "zeros_pct": 10.6, "negatives": 5, "negatives_pct": 0.5, "skewness": null, "kurtosis": null, "is_integer_like": false, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "0.3", "count": 889, "pct": 88.9}, {"value": "0", "count": 106, "pct": 10.6}, {"value": "-0.3", "count": 5, "pct": 0.5}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "accepted_values", "severity": "suggested", "values": ["0.3", "0", "-0.3"], "description": "Restrict to the 3 observed value(s), covering 100.0% of rows."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is -0.3 to 0.3 \u2014 consider a bounds check."}], "dbt_snippet": "- name: imp_surcharge\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: -0.3\n        max_value: 0.3"}, {"name": "pickup_location_id", "dtype": "STRING", "semantic_type": "high_cardinality_text", "semantic_type_confidence": 0.6, "semantic_notes": ["High cardinality string \u2014 verify whether this should be categorical, an identifier, or free text.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 104, "unique_pct": 10.4, "memory_bytes": null, "numeric_stats": null, "string_stats": {"min_length": 1, "max_length": 3, "mean_length": 2.38, "empty_or_whitespace": 0}, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "74", "count": 121, "pct": 12.1}, {"value": "75", "count": 78, "pct": 7.8}, {"value": "193", "count": 73, "pct": 7.3}, {"value": "166", "count": 61, "pct": 6.1}, {"value": "41", "count": 57, "pct": 5.7}, {"value": "244", "count": 51, "pct": 5.1}, {"value": "95", "count": 38, "pct": 3.8}, {"value": "7", "count": 38, "pct": 3.8}, {"value": "42", "count": 31, "pct": 3.1}, {"value": "82", "count": 28, "pct": 2.8}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "cardinality_review", "severity": "info", "description": "High cardinality for a text-like field \u2014 confirm it isn't meant to be a controlled category or a key."}], "dbt_snippet": "- name: pickup_location_id\n  tests:\n    - not_null"}, {"name": "dropoff_location_id", "dtype": "STRING", "semantic_type": "high_cardinality_text", "semantic_type_confidence": 0.6, "semantic_notes": ["High cardinality string \u2014 verify whether this should be categorical, an identifier, or free text.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 172, "unique_pct": 17.2, "memory_bytes": null, "numeric_stats": null, "string_stats": {"min_length": 1, "max_length": 3, "mean_length": 2.69, "empty_or_whitespace": 0}, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "193", "count": 73, "pct": 7.3}, {"value": "244", "count": 39, "pct": 3.9}, {"value": "243", "count": 33, "pct": 3.3}, {"value": "238", "count": 31, "pct": 3.1}, {"value": "239", "count": 26, "pct": 2.6}, {"value": "138", "count": 25, "pct": 2.5}, {"value": "132", "count": 23, "pct": 2.3}, {"value": "140", "count": 22, "pct": 2.2}, {"value": "142", "count": 21, "pct": 2.1}, {"value": "41", "count": 20, "pct": 2.0}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "cardinality_review", "severity": "info", "description": "High cardinality for a text-like field \u2014 confirm it isn't meant to be a controlled category or a key."}], "dbt_snippet": "- name: dropoff_location_id\n  tests:\n    - not_null"}, {"name": "data_file_year", "dtype": "INTEGER", "semantic_type": "constant", "semantic_type_confidence": 1.0, "semantic_notes": ["Only one distinct value across all non-null rows.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 1, "unique_pct": 0.1, "memory_bytes": null, "numeric_stats": {"mean": 2022.0, "std": 0.0, "min": 2022.0, "q1": 2022.0, "median": 2022.0, "q3": 2022.0, "max": 2022.0, "range": 0.0, "sum": 2022000.0, "zeros": 0, "zeros_pct": 0.0, "negatives": 0, "negatives_pct": 0.0, "skewness": null, "kurtosis": null, "is_integer_like": true, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "2022", "count": 1000, "pct": 100.0}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is 2022.0 to 2022.0 \u2014 consider a bounds check."}, {"type": "review_column", "severity": "warning", "description": "Single distinct value across the dataset \u2014 likely low analytical value."}], "dbt_snippet": "- name: data_file_year\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: 2022.0\n        max_value: 2022.0"}, {"name": "data_file_month", "dtype": "INTEGER", "semantic_type": "constant", "semantic_type_confidence": 1.0, "semantic_notes": ["Only one distinct value across all non-null rows.", "Distinct count is approximate (APPROX_COUNT_DISTINCT)."], "count": 1000, "missing": 0, "missing_pct": 0.0, "unique": 1, "unique_pct": 0.1, "memory_bytes": null, "numeric_stats": {"mean": 11.0, "std": 0.0, "min": 11.0, "q1": 11.0, "median": 11.0, "q3": 11.0, "max": 11.0, "range": 0.0, "sum": 11000.0, "zeros": 0, "zeros_pct": 0.0, "negatives": 0, "negatives_pct": 0.0, "skewness": null, "kurtosis": null, "is_integer_like": true, "infinite_count": 0, "nan_count": 0, "quantiles_approximate": true}, "string_stats": null, "datetime_stats": null, "boolean_stats": null, "histogram": null, "length_histogram": null, "top_values": [{"value": "11", "count": 1000, "pct": 100.0}], "sensitive": {"is_sensitive": false, "category": null, "type": null, "confidence": 0.0, "detected_by": [], "category_label": null, "type_label": null, "reasons": []}, "quality_rules": [{"type": "not_null", "severity": "suggested", "description": "No missing values observed \u2014 consider enforcing NOT NULL."}, {"type": "range_check", "severity": "suggested", "description": "Observed range is 11.0 to 11.0 \u2014 consider a bounds check."}, {"type": "review_column", "severity": "warning", "description": "Single distinct value across the dataset \u2014 likely low analytical value."}], "dbt_snippet": "- name: data_file_month\n  tests:\n    - not_null\n    - dbt_utils.accepted_range:\n        min_value: 11.0\n        max_value: 11.0"}], "correlations": {"columns": ["passenger_count", "trip_distance", "fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount", "ehail_fee", "airport_fee", "total_amount", "distance_between_service", "time_between_service", "imp_surcharge", "data_file_year", "data_file_month"], "matrix": [[1.0, 0.075, 0.098, -0.022, 0.088, 0.094, 0.0, 0.0, 0.0, 0.116, 0.0, 0.0, 0.09, 0.0, 0.0], [0.075, 1.0, 0.569, 0.131, 0.344, 0.219, 0.314, 0.0, 0.0, 0.607, 0.0, 0.0, 0.21, 0.0, 0.0], [0.098, 0.569, 1.0, 0.103, 0.367, 0.126, 0.271, 0.0, 0.0, 0.964, 0.0, 0.0, 0.39, 0.0, 0.0], [-0.022, 0.131, 0.103, 1.0, 0.351, -0.003, -0.058, 0.0, 0.0, 0.134, 0.0, 0.0, 0.152, 0.0, 0.0], [0.088, 0.344, 0.367, 0.351, 1.0, 0.044, 0.028, 0.0, 0.0, 0.4, 0.0, 0.0, 0.44, 0.0, 0.0], [0.094, 0.219, 0.126, -0.003, 0.044, 1.0, 0.087, 0.0, 0.0, 0.356, 0.0, 0.0, 0.093, 0.0, 0.0], [0.0, 0.314, 0.271, -0.058, 0.028, 0.087, 1.0, 0.0, 0.0, 0.34, 0.0, 0.0, 0.032, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.116, 0.607, 0.964, 0.134, 0.4, 0.356, 0.34, 0.0, 0.0, 1.0, 0.0, 0.0, 0.408, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.09, 0.21, 0.39, 0.152, 0.44, 0.093, 0.032, 0.0, 0.0, 0.408, 0.0, 0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]], "truncated": false}, "missing_correlation": null, "pk_candidates": [], "high_correlation_pairs": [{"col1": "fare_amount", "col2": "total_amount", "correlation": 0.964}], "duplicate_columns": [], "functional_dependencies": [], "referential_integrity": [], "reference_suggestions": []};
+
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+function fmtInt(n) { if (n === null || n === undefined) return '\u2014'; return Number(n).toLocaleString('en-US'); }
+function fmtPct(n, digits) { if (n === null || n === undefined) return '\u2014'; return Number(n).toFixed(digits === undefined ? 1 : digits) + '%'; }
+function fmtNum(n) { if (n === null || n === undefined) return '\u2014'; if (Number.isInteger(n)) return fmtInt(n); return Number(n).toLocaleString('en-US', {maximumFractionDigits: 3}); }
+function fmtBytes(n) { if (n === null || n === undefined) return '\u2014'; if (n < 1024) return n + ' B'; if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB'; return (n/1024/1024).toFixed(2) + ' MB'; }
+function titleCase(s) { return String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+
+const TYPE_COLOR = {
+  identifier: 'var(--teal)', continuous_numeric: 'var(--teal)',
+  discrete_numeric_categorical: 'var(--amber)', categorical: 'var(--amber)', binary_categorical: 'var(--amber)',
+  boolean: 'var(--green)',
+  datetime: 'var(--text-muted)', datetime_string: 'var(--text-muted)', free_text: 'var(--text-muted)', high_cardinality_text: 'var(--text-muted)',
+  constant: 'var(--text-faint)', empty: 'var(--text-faint)', unknown: 'var(--text-faint)',
+};
+const TYPE_ICON = {
+  identifier: 'vpn_key', continuous_numeric: 'monitoring', discrete_numeric_categorical: 'numbers',
+  categorical: 'sell', binary_categorical: 'toggle_on', boolean: 'toggle_on',
+  datetime: 'calendar_month', datetime_string: 'calendar_month', free_text: 'description', high_cardinality_text: 'notes',
+  constant: 'block', empty: 'inbox', unknown: 'help',
+};
+const SEVERITY_COLOR = { high: 'var(--coral)', warning: 'var(--amber)', info: 'var(--teal)', sensitive: 'var(--violet)', suggested: 'var(--green)' };
+const SEVERITY_ICON = { high: 'error', warning: 'warning', info: 'info', sensitive: 'shield', suggested: 'check_circle' };
+const SOFT_BG = { 'var(--teal)': 'var(--teal-soft)', 'var(--amber)': 'var(--amber-soft)', 'var(--coral)': 'var(--coral-soft)', 'var(--violet)': 'var(--violet-soft)', 'var(--green)': 'var(--green-soft)' };
+function softBg(colorVar) { return SOFT_BG[colorVar] || 'var(--surface-2)'; }
+function icon(name, size, extraStyle, filled) {
+  const cls = 'material-symbols-outlined icon' + (size ? ' icon-' + size : '') + (filled ? ' icon-fill' : '');
+  return '<span class="' + cls + '"' + (extraStyle ? ' style="' + extraStyle + '"' : '') + ' aria-hidden="true">' + name + '</span>';
+}
+
+
+
+const tooltipEl = document.getElementById('tooltip');
+function showTooltip(evt, html) { tooltipEl.innerHTML = html; tooltipEl.style.display = 'block'; positionTooltip(evt); }
+function positionTooltip(evt) {
+  const pad = 14;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  const rect = tooltipEl.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth) x = evt.clientX - rect.width - pad;
+  if (y + rect.height > window.innerHeight) y = evt.clientY - rect.height - pad;
+  tooltipEl.style.left = x + 'px'; tooltipEl.style.top = y + 'px';
+}
+function hideTooltip() { tooltipEl.style.display = 'none'; }
+function wireTooltips(root) {
+  root.querySelectorAll('[data-tip]').forEach(elx => {
+    elx.addEventListener('mouseenter', e => showTooltip(e, elx.getAttribute('data-tip')));
+    elx.addEventListener('mousemove', positionTooltip);
+    elx.addEventListener('mouseleave', hideTooltip);
+  });
+}
+
+function getChartSpec(col) {
+  if (col.numeric_stats && col.histogram && col.histogram.counts && col.histogram.counts.length) return {type: 'histogram', hist: col.histogram};
+  if (col.boolean_stats) return {type: 'boolean', stats: col.boolean_stats};
+  if ((col.semantic_type === 'datetime' || col.semantic_type === 'datetime_string') && col.datetime_stats && col.datetime_stats.weekday_distribution) return {type: 'weekday', dist: col.datetime_stats.weekday_distribution};
+  if (['categorical','binary_categorical','discrete_numeric_categorical'].indexOf(col.semantic_type) !== -1 && col.top_values && col.top_values.length) return {type: 'topvalues', values: col.top_values};
+  if (col.string_stats && col.length_histogram && col.length_histogram.counts && col.length_histogram.counts.length) return {type: 'length', hist: col.length_histogram};
+  if (col.top_values && col.top_values.length) return {type: 'topvalues', values: col.top_values};
+  return {type: 'none'};
+}
+
+function chartCaption(col, spec) {
+  if (spec.type === 'histogram' && col.numeric_stats) return fmtNum(col.numeric_stats.min) + ' \u2013 ' + fmtNum(col.numeric_stats.max);
+  if (spec.type === 'length' && col.string_stats) return 'avg length ' + fmtNum(col.string_stats.mean_length) + ' chars';
+  if (spec.type === 'topvalues' && col.top_values.length) return 'top: ' + col.top_values[0].value + ' (' + fmtPct(col.top_values[0].pct) + ')';
+  if (spec.type === 'weekday' && col.datetime_stats) return (col.datetime_stats.min_date||'').slice(0,10) + ' \u2192 ' + (col.datetime_stats.max_date||'').slice(0,10);
+  if (spec.type === 'boolean' && col.boolean_stats) return fmtPct(col.boolean_stats.true_pct) + ' true';
+  return '';
+}
+
+function renderBars(spec, size) {
+  const cls = size === 'lg' ? 'bars-lg' : 'bars-sm';
+  if (spec.type === 'histogram' || spec.type === 'length') {
+    const counts = spec.hist.counts, edges = spec.hist.edges;
+    const max = Math.max(...counts, 1);
+    const bars = counts.map((c,i) => {
+      const tip = fmtNum(edges[i]) + '\u2013' + fmtNum(edges[i+1]) + '<br>' + fmtInt(c) + ' rows';
+      return '<span class="bar-el" style="height:' + Math.max(4, c/max*100) + '%" data-tip="' + esc(tip) + '"></span>';
+    }).join('');
+    return '<div class="bars ' + cls + '">' + bars + '</div>';
+  }
+  if (spec.type === 'topvalues') {
+    const vals = spec.values.slice(0, size === 'lg' ? 12 : 7);
+    const max = Math.max(...vals.map(v => v.count), 1);
+    const bars = vals.map(v => {
+      const tip = esc(v.value) + '<br>' + fmtInt(v.count) + ' (' + fmtPct(v.pct) + ')';
+      return '<span class="bar-el" style="height:' + Math.max(4, v.count/max*100) + '%" data-tip="' + tip + '"></span>';
+    }).join('');
+    return '<div class="bars ' + cls + '">' + bars + '</div>';
+  }
+  if (spec.type === 'weekday') {
+    const order = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const max = Math.max(...order.map(d => spec.dist[d]||0), 1);
+    const bars = order.map(d => {
+      const c = spec.dist[d]||0;
+      const tip = d + '<br>' + fmtInt(c);
+      return '<span class="bar-el" style="height:' + Math.max(4, c/max*100) + '%" data-tip="' + esc(tip) + '"></span>';
+    }).join('');
+    return '<div class="bars ' + cls + '">' + bars + '</div>';
+  }
+  if (spec.type === 'boolean') {
+    const t = spec.stats.true_pct, f = 100 - t;
+    return '<div class="bars ' + cls + '">' +
+      '<span class="bar-el" style="height:' + Math.max(4,t) + '%; background:var(--green)" data-tip="True<br>' + fmtPct(t) + '"></span>' +
+      '<span class="bar-el" style="height:' + Math.max(4,f) + '%; background:var(--coral)" data-tip="False<br>' + fmtPct(f) + '"></span>' +
+      '</div>';
+  }
+  return '<div class="bars-empty">no distribution</div>';
+}
+
+function renderHeader() {
+  document.getElementById('source-name').textContent = PROFILE.meta.source_name;
+  const d = new Date(PROFILE.meta.generated_at);
+  document.getElementById('generated-at').textContent = isNaN(d.getTime()) ? PROFILE.meta.generated_at : d.toLocaleString();
+  document.title = 'Data Profile \u2014 ' + PROFILE.meta.source_name;
+}
+
+// One KPI tile. `t.link` names a KPI_LINKS entry; tiles with nothing to
+// drill into stay static rather than linking somewhere that doesn't
+// explain the number.
+function kpiTile(t, i) {
+  const link = t.link && KPI_LINKS[t.link];
+  const inner =
+    '<div class="kpi-icon-badge" style="--badge-color:' + t.color + ';--badge-bg:' + softBg(t.color) + '">' + icon(t.iconName, 'xl', null, true) + '</div>' +
+    '<div class="kpi-value">' + esc(t.value) + '</div>' +
+    '<div class="kpi-label">' + esc(t.label) + '</div>' +
+    (t.sub ? '<div class="kpi-sub">' + esc(t.sub) + '</div>' : '') +
+    (t.bar !== undefined ? '<div class="kpi-bar"><span style="width:' + t.bar + '%; background:' + t.barColor + '"></span></div>' : '');
+  if (!link) return '<div class="kpi-card" style="--i:' + (i+1) + '">' + inner + '</div>';
+  return '<button type="button" class="kpi-card kpi-link" style="--i:' + (i+1) + '" data-kpi-link="' + t.link + '" title="' + esc(link.hint) + '">' +
+    '<span class="kpi-link-arrow">' + icon('arrow_downward', 'sm') + '</span>' + inner + '</button>';
+}
+function wireKpiLinks(root) {
+  root.querySelectorAll('[data-kpi-link]').forEach(btn => btn.addEventListener('click', () => KPI_LINKS[btn.dataset.kpiLink].go()));
+}
+
+function renderHero() {
+  const m = PROFILE.meta, o = PROFILE.overview;
+  const nCols = (PROFILE.columns || []).length;
+  const tiles = [
+    {label: 'Rows', value: fmtInt(m.n_rows), iconName: 'table_rows', color: 'var(--teal)'},
+    {label: 'Columns', value: fmtInt(m.n_cols), iconName: 'view_column', color: 'var(--teal)', link: nCols > 0 ? 'columns' : null},
+    {label: 'Personal & sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield_person', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)', link: 'sensitive'},
+    {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '—' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
+  ];
+  const grid = document.getElementById('kpi-grid');
+  grid.innerHTML = tiles.map(kpiTile).join('');
+  wireKpiLinks(grid);
+}
+
+const SEVERITY_ORDER = {high:0, sensitive:1, warning:2, info:3};
+function sortAlerts(alerts) {
+  const rank = a => SEVERITY_ORDER[a.severity] === undefined ? 9 : SEVERITY_ORDER[a.severity];
+  return alerts.slice().sort((a,b) => rank(a) - rank(b));
+}
+function alertRows(alerts, emptyMsg) {
+  if (!alerts.length) return '<div class="alert-empty">' + icon('check_circle','sm') + ' ' + esc(emptyMsg) + '</div>';
+  return '<div class="alert-list">' + sortAlerts(alerts).map(a =>
+    '<div class="alert-row" style="--sev-color:' + (SEVERITY_COLOR[a.severity] || 'var(--border)') + '">' +
+      '<span class="alert-glyph">' + icon(SEVERITY_ICON[a.severity] || 'info', 'sm') + '</span>' +
+      '<span class="alert-msg">' + (a.column ? '<button type="button" class="alert-col-link" data-open-col="' + esc(a.column) + '" title="Open column details">' + esc(a.column) + '</button> — ' : '') + esc(a.message) + '</span>' +
+    '</div>').join('') + '</div>';
+}
+function scopeBlock(tagIcon, tagLabel, desc, tiles, alerts, emptyMsg) {
+  return '<div class="dq-scope-head"><span class="scope-tag">' + icon(tagIcon, 'sm') + esc(tagLabel) + '</span><span class="scope-desc">' + esc(desc) + '</span></div>' +
+    '<div class="dq-tiles">' + tiles.map(kpiTile).join('') + '</div>' +
+    '<div class="dq-alerts-head">' + icon('warning', 'sm') + 'Alerts <span class="count">' + alerts.length + '</span></div>' +
+    alertRows(alerts, emptyMsg);
+}
+
+// Table-level vs column-level is decided by the alert itself: alerts tied
+// to one column carry its name, everything else (duplicate rows, identical
+// column pairs, correlations, dependencies, skipped columns) has none.
+function renderQuality() {
+  const m = PROFILE.meta, o = PROFILE.overview, cols = PROFILE.columns || [];
+  const alerts = o.alerts || [];
+  const tableAlerts = alerts.filter(a => !a.column);
+  const columnAlerts = alerts.filter(a => a.column);
+
+  const completeness = Math.max(0, 100 - o.total_missing_pct);
+  const completenessColor = completeness > 90 ? 'var(--green)' : completeness > 70 ? 'var(--amber)' : 'var(--coral)';
+  const totalCells = (m.n_rows || 0) * cols.length;
+  const dupMeasured = m.duplicate_rows !== null && m.duplicate_rows !== undefined;
+  const tableTiles = [
+    {label: 'Completeness', value: cols.length ? fmtPct(completeness) : '—', sub: totalCells ? fmtInt(totalCells - o.total_missing_cells) + ' of ' + fmtInt(totalCells) + ' cells filled' : 'no cells',
+     bar: totalCells ? completeness : undefined, barColor: completenessColor, iconName: 'task_alt', color: completenessColor},
+    {label: 'Duplicate rows', value: dupMeasured ? fmtInt(m.duplicate_rows) : 'Not measured',
+     sub: dupMeasured ? (m.duplicate_rows ? fmtPct(m.duplicate_rows_pct) + ' of rows are exact copies' : 'no exact copies') : 'not computed by this engine',
+     iconName: 'content_copy', color: !dupMeasured ? 'var(--text-faint)' : m.duplicate_rows > 0 ? 'var(--amber)' : 'var(--green)'},
+  ];
+
+  const withMissing = cols.filter(c => c.missing > 0).length;
+  const constant = cols.filter(c => c.semantic_type === 'constant').length;
+  const columnTiles = [
+    {label: 'Columns with missing values', value: fmtInt(withMissing) + ' / ' + fmtInt(cols.length), sub: withMissing ? 'click to sort by missing %' : cols.length ? 'every column fully populated' : 'no columns',
+     iconName: 'help', color: withMissing ? 'var(--amber)' : 'var(--green)', link: withMissing ? 'missing' : null},
+    {label: 'Constant columns', value: fmtInt(constant), sub: constant ? 'single distinct value' : cols.length ? 'none' : 'no columns',
+     iconName: 'block', color: constant ? 'var(--amber)' : 'var(--green)', link: constant ? 'constant' : null},
+  ];
+
+  const tableEl = document.getElementById('dq-table');
+  const colEl = document.getElementById('dq-column');
+  tableEl.innerHTML = scopeBlock('table', 'Table level', 'The dataset as a whole and relationships between columns', tableTiles, tableAlerts, 'No table-level alerts.');
+  colEl.innerHTML = scopeBlock('view_column', 'Column level', 'Individual columns — click a name for details', columnTiles, columnAlerts, 'No column-level alerts.');
+  [tableEl, colEl].forEach(el => {
+    wireKpiLinks(el);
+    el.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  });
+}
+
+// Each KPI link puts the target section into the view that explains the
+// number, then scrolls to it.
+const KPI_LINKS = {
+  columns:   {hint: 'Show all columns',                 go: () => { setColumnView({}); jumpTo('columns-section'); }},
+  missing:   {hint: 'Show columns sorted by missing %', go: () => { setColumnView({sort: 'missing'}); jumpTo('columns-section'); }},
+  constant:  {hint: 'Show only constant columns',       go: () => { setColumnView({types: ['constant']}); jumpTo('columns-section'); }},
+  sensitive: {hint: 'What was flagged, and why',         go: () => jumpTo('sensitive-panel')},
+};
+
+function setColumnView(opts) {
+  state.search = '';
+  document.getElementById('search-input').value = '';
+  state.typeFilters = new Set(opts.types || []);
+  document.querySelectorAll('[data-filter-type]').forEach(b => b.classList.toggle('active', state.typeFilters.has(b.dataset.filterType)));
+  state.sensitiveOnly = !!opts.sensitiveOnly;
+  const sensBtn = document.querySelector('[data-filter-sensitive]');
+  if (sensBtn) { sensBtn.classList.toggle('active', state.sensitiveOnly); sensBtn.setAttribute('aria-pressed', String(state.sensitiveOnly)); }
+  if (opts.sort) { state.sort = opts.sort; document.getElementById('sort-select').value = opts.sort; }
+  renderColumnGrid();
+}
+
+function jumpTo(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({block: 'start'});
+  el.classList.remove('flash');
+  void el.offsetWidth;  // restart the animation on repeat clicks
+  el.classList.add('flash');
+}
+
+
+function renderTypeDistribution() {
+  const dist = PROFILE.overview.type_distribution || {};
+  const entries = Object.entries(dist).sort((a,b) => b[1]-a[1]);
+  const max = Math.max(...entries.map(e => e[1]), 1);
+  const html = entries.map(([type, count]) =>
+    '<div class="dist-row">' +
+      '<span class="dist-label row-icon">' + icon(TYPE_ICON[type]||'help', null, 'color:' + (TYPE_COLOR[type]||'var(--text-muted)'), true) + ' ' + esc(titleCase(type)) + '</span>' +
+      '<span class="dist-bar-track"><span class="dist-bar-fill" style="width:' + (count/max*100) + '%; background:' + (TYPE_COLOR[type]||'var(--text-muted)') + '"></span></span>' +
+      '<span class="dist-count">' + count + '</span>' +
+    '</div>'
+  ).join('');
+  document.getElementById('type-dist-bars').innerHTML = html || '<div class="empty-state">No columns.</div>';
+}
+
+function heatColor(t) {
+  t = Math.max(-1, Math.min(1, t));
+  const base = [241,243,244];
+  const target = t >= 0 ? [26,115,232] : [217,48,37];
+  const f = Math.abs(t);
+  const mix = base.map((c,i) => Math.round(c + (target[i]-c)*f));
+  return {rgb: 'rgb(' + mix.join(',') + ')', strong: f > 0.4};
+}
+function truncateLabel(s) { return s.length > 11 ? s.slice(0,10) + '\u2026' : s; }
+
+function renderHeatmap(containerId, data, emptyMsg) {
+  const container = document.getElementById(containerId);
+  if (!data || !data.columns || data.columns.length < 2) { container.innerHTML = '<div class="empty-state">' + emptyMsg + '</div>'; return; }
+  const cols = data.columns;
+  let html = '<table class="heatmap"><thead><tr><th></th>' + cols.map(c => '<th class="heat-col-head" title="' + esc(c) + '">' + esc(truncateLabel(c)) + '</th>').join('') + '</tr></thead><tbody>';
+  cols.forEach((rowName, i) => {
+    html += '<tr><th class="heat-row-head" title="' + esc(rowName) + '">' + esc(truncateLabel(rowName)) + '</th>';
+    cols.forEach((colName, j) => {
+      const v = data.matrix[i][j];
+      const c = heatColor(v);
+      const tip = esc(rowName) + ' \u00d7 ' + esc(colName) + '<br>' + v.toFixed(2);
+      html += '<td class="heat-cell" style="background:' + c.rgb + '; color:' + (c.strong ? 'var(--bg)' : 'var(--text-muted)') + '" data-tip="' + tip + '">' + v.toFixed(2) + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  wireTooltips(container);
+}
+function renderCorrelation() { renderHeatmap('corr-heatmap', PROFILE.correlations, 'Fewer than two numeric columns \u2014 nothing to correlate.'); }
+function renderMissingCorr() {
+  const section = document.getElementById('missing-corr-section');
+  if (!PROFILE.missing_correlation) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  renderHeatmap('missing-corr-heatmap', PROFILE.missing_correlation, 'Not enough columns with partial missingness.');
+}
+function renderPkCandidates() {
+  const panel = document.getElementById('pk-panel');
+  const list = document.getElementById('pk-list');
+  const candidates = PROFILE.pk_candidates || [];
+  if (!candidates.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  list.innerHTML = candidates.map(c => '<div class="pk-row"><span class="pk-type">' + (c.type === 'single' ? 'Single column' : 'Composite') + '</span><span class="pk-cols">' + c.columns.map(esc).join(' + ') + '</span></div>').join('');
+}
+
+function renderFunctionalDependencies() {
+  const panel = document.getElementById('fd-panel');
+  const list = document.getElementById('fd-list');
+  const fds = PROFILE.functional_dependencies || [];
+  if (!fds.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  list.innerHTML = fds.map(fd => {
+    const exact = fd.purity >= 0.999999;
+    const purityLabel = exact ? 'always' : (fd.purity * 100).toFixed(1) + '%';
+    const tip = exact
+      ? esc(fd.determinant) + ' determines ' + esc(fd.dependent) + ' with no exceptions across ' + fd.support_rows + ' row(s).'
+      : esc(fd.determinant) + ' determines ' + esc(fd.dependent) + ' in ' + purityLabel + ' of ' + fd.support_rows + ' row(s) — ' + fd.violation_count + ' exception(s).';
+    return '<div class="fd-row">' +
+      '<span class="fd-expr" data-tip="' + tip + '"><b>' + esc(fd.determinant) + '</b> <span class="fd-arrow">→</span> <b>' + esc(fd.dependent) + '</b></span>' +
+      '<span class="fd-support">' + fd.distinct_determinant_values + ' value(s)</span>' +
+      '<span class="fd-purity ' + (exact ? 'fd-purity-exact' : 'fd-purity-partial') + '">' + purityLabel + '</span>' +
+    '</div>';
+  }).join('');
+  wireTooltips(list);
+}
+
+function renderReferentialIntegrity() {
+  const panel = document.getElementById('ri-panel');
+  const list = document.getElementById('ri-list');
+  const checks = (PROFILE.referential_integrity || []).slice()
+    .sort((a,b) => (b.orphans > 0) - (a.orphans > 0) || (a.source === 'declared' ? -1 : 1) - (b.source === 'declared' ? -1 : 1));
+  const suggestions = PROFILE.reference_suggestions || [];
+  const listed = suggestions.filter(s => s.status === 'listed');
+  const overLimit = suggestions.filter(s => s.status === 'over_limit').length;
+  if (!checks.length && !listed.length && !overLimit) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  const highPct = setting('ri_high_orphan_pct', 5);
+  const listedHtml = listed.map(sg =>
+    '<div class="ri-row">' +
+      '<div class="ri-head">' +
+        '<span class="ri-expr"><button type="button" class="alert-col-link" data-open-col="' + esc(sg.column) + '" title="Open column details">' + esc(sg.column) + '</button> <span class="fd-arrow">\u2192</span> <b>' + esc(sg.references) + '</b></span>' +
+        '<span class="ri-tag">suggested</span><span class="ri-tag">same table</span>' +
+        '<span class="ri-status" style="--sev-color:var(--text-muted);--sev-bg:var(--surface-2)">' + icon('schedule', 'sm') + 'not checked</span>' +
+      '</div>' +
+      '<div class="ri-detail">Looks like a reference from its name and data, but checking it is an extra query' +
+        (sg.estimated_bytes !== null && sg.estimated_bytes !== undefined ? ' (about ' + fmtBytes(sg.estimated_bytes) + ' scanned)' : '') +
+        '. Rerun with <code>--suggested-references check</code>.</div>' +
+    '</div>').join('') +
+    (overLimit ? '<div class="ri-row"><div class="ri-detail">' + overLimit + ' more possible reference' + (overLimit === 1 ? '' : 's') +
+      ' over the limit \u2014 raise <code>--max-reference-suggestions</code> (see the run summary).</div></div>' : '');
+  list.innerHTML = checks.map(r => {
+    const bad = r.orphans > 0;
+    const sev = !bad ? 'var(--green)' : (r.source === 'declared' && r.orphan_pct > highPct ? 'var(--coral)' : 'var(--amber)');
+    const status = bad
+      ? icon('link_off', 'sm') + fmtInt(r.orphans) + ' orphan row' + (r.orphans === 1 ? '' : 's') + ' \u00b7 ' + fmtPct(r.orphan_pct, r.orphan_pct < 0.1 ? 3 : 1)
+      : icon('check', 'sm') + 'all matched';
+    const samples = (r.sample_orphans || []).map(s => '<code>' + esc(s.value) + '</code>' + (s.count > 1 ? ' \u00d7' + fmtInt(s.count) : '')).join(', ');
+    const detail = bad
+      ? fmtInt(r.orphan_values) + ' value' + (r.orphan_values === 1 ? '' : 's') + ' not found in <code>' + esc(r.references) + '</code>' + (samples ? ', e.g. ' + samples : '') + (r.orphan_values > (r.sample_orphans || []).length ? ' \u2026' : '')
+      : 'All ' + fmtInt(r.checked) + ' non-null values found in <code>' + esc(r.references) + '</code>.';
+    const tip = r.source === 'suggested'
+      ? 'Suggested from the column names and data \u2014 not declared. Verify it really is a reference.'
+      : 'Declared check.';
+    return '<div class="ri-row">' +
+      '<div class="ri-head">' +
+        '<span class="ri-expr"><button type="button" class="alert-col-link" data-open-col="' + esc(r.column) + '" title="Open column details">' + esc(r.column) + '</button> <span class="fd-arrow">\u2192</span> <b>' + esc(r.references) + '</b></span>' +
+        '<span class="ri-tag" data-tip="' + esc(tip) + '">' + (r.source === 'suggested' ? 'suggested' : 'declared') + '</span>' +
+        '<span class="ri-tag">' + (r.same_table ? 'same table' : 'other table') + '</span>' +
+        '<span class="ri-status" style="--sev-color:' + sev + ';--sev-bg:' + softBg(sev) + '">' + status + '</span>' +
+      '</div>' +
+      '<div class="ri-detail">' + detail + (r.compared_as === 'text' ? ' <span class="panel-sub">(compared as text: the two columns have different types)</span>' : '') + '</div>' +
+    '</div>';
+  }).join('') + listedHtml;
+  list.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  wireTooltips(list);
+}
+
+// Plain-language labels; older profiles only have the PII/PHI/PCI codes.
+const SENS_GROUP = {PII: 'Personal data', PHI: 'Health data', PCI: 'Payment data'};
+function sensGroup(sv) { return sv.category_label || SENS_GROUP[sv.category] || sv.category || 'Sensitive data'; }
+function sensType(sv) { return sv.type_label || String(sv.type || '').replace(/_/g, ' '); }
+function sensLabel(sv) { return sensGroup(sv) + ': ' + sensType(sv); }
+
+function renderSensitive() {
+  const cols = (PROFILE.columns || []).filter(c => c.sensitive && c.sensitive.is_sensitive)
+    .sort((a,b) => b.sensitive.confidence - a.sensitive.confidence);
+  const minConf = setting('sensitive_alert_min_confidence', 0.7);
+  const bq = PROFILE.meta.engine === 'bigquery';
+  let html = '<p class="sens-intro">datascope checks every column\u2019s <b>name</b>' +
+    (bq ? '' : ' and a <b>sample of its values</b>') + ' for <b>personal data</b> (PII: names, email addresses, phone numbers, ' +
+    'postal addresses, ID numbers, dates of birth), <b>health data</b> (PHI: medical records, diagnoses, medication) and ' +
+    '<b>payment data</b> (PCI: card and bank account numbers). Values in flagged columns are <b>masked everywhere in this report</b>. ' +
+    'This is pattern matching to point you at columns worth a review, not a compliance decision.' +
+    (bq ? ' On BigQuery only column names are checked: checking values would mean pulling them out of the warehouse.' : '') + '</p>';
+  if (!cols.length) {
+    html += '<div class="empty-state">' + icon('check_circle', 'sm') + ' No column looks like personal or sensitive data.</div>';
+  } else {
+    html += '<table class="sens-table"><thead><tr><th>Column</th><th>Kind</th><th>Looks like</th><th>Why</th><th>Confidence</th></tr></thead><tbody>' +
+      cols.map(c => {
+        const sv = c.sensitive;
+        const alerted = sv.confidence >= minConf;
+        return '<tr><td><button type="button" class="alert-col-link" data-open-col="' + esc(c.name) + '" title="Open column details">' + esc(c.name) + '</button></td>' +
+          '<td><span class="sens-kind">' + esc(sensGroup(sv)) + '</span></td>' +
+          '<td>' + esc(sensType(sv)) + '</td>' +
+          '<td class="sens-why">' + esc((sv.reasons || []).join(' ') || ((sv.detected_by || []).join(', ').replace(/_/g, ' '))) + '</td>' +
+          '<td class="sens-conf">' + Math.round(sv.confidence * 100) + '%<span class="panel-sub">' +
+            (alerted ? 'alert raised' : 'below the alert threshold (' + Math.round(minConf * 100) + '%)') + '</span></td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+  const body = document.getElementById('sensitive-body');
+  body.innerHTML = html;
+  body.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  document.getElementById('sensitive-panel').hidden = false;
+}
+
+const SETTINGS_DOC = [{"name": "top_n_values", "flag": "--top-n-values", "default": 10, "help": "Most frequent values kept per column.", "group": "Column statistics and sampling", "engines": "both"}, {"name": "histogram_bins", "flag": "--histogram-bins", "default": 30, "help": "Bars in each numeric histogram.", "group": "Column statistics and sampling", "engines": "pandas"}, {"name": "sample_size_for_content_checks", "flag": "--sample-size", "default": 1000, "help": "Rows sampled per column when checking values for personal or sensitive data (emails, phone numbers, ID and card numbers...). Larger = slower, fewer misses.", "group": "Column statistics and sampling", "engines": "pandas"}, {"name": "random_state", "flag": "--random-state", "default": 42, "help": "Seed for that sample, so reruns flag the same columns.", "group": "Column statistics and sampling", "engines": "pandas"}, {"name": "sensitive_min_match_pct", "flag": "--sensitive-min-match-pct", "default": 1.0, "help": "Flag a column as personal or sensitive data when at least this % of its sampled values match a pattern (email address, phone, ID, card or bank account number), whole or, for emails and dashed ID numbers, inside text. Low by default: a column that is only partly personal data still holds personal data. Column names are checked regardless.", "group": "Column statistics and sampling", "engines": "pandas"}, {"name": "missing_warning_pct", "flag": "--missing-warning-pct", "default": 20.0, "help": "A column with more than this % missing raises a warning.", "group": "Alert thresholds", "engines": "both"}, {"name": "missing_high_pct", "flag": "--missing-high-pct", "default": 50.0, "help": "A column with more than this % missing raises a high-severity alert.", "group": "Alert thresholds", "engines": "both"}, {"name": "outlier_alert_pct", "flag": "--outlier-alert-pct", "default": 5.0, "help": "Alert when more than this % of a numeric column is outside 1.5x IQR.", "group": "Alert thresholds", "engines": "pandas"}, {"name": "sensitive_alert_min_confidence", "flag": "--sensitive-alert-min-confidence", "default": 0.0, "help": "Raise an alert for a column that looks like personal or sensitive data only at or above this detection confidence (0-1). The default 0 alerts on every flagged column; raise it to alert only on the clearest cases. Flagged columns are masked either way.", "group": "Alert thresholds", "engines": "both"}, {"name": "correlations", "flag": "--correlations", "default": true, "help": "Pearson correlation matrix of numeric columns (and, on pandas, the missing-value correlation matrix). On BigQuery this adds CORR() terms to the first profiling query: free for tables of up to --max-columns-per-query columns, see --estimate for the exact cost.", "group": "Correlations", "engines": "both"}, {"name": "max_correlation_cols", "flag": "--max-correlation-cols", "default": 30, "help": "Correlate at most this many numeric columns (n*(n-1)/2 pairs).", "group": "Correlations", "engines": "both"}, {"name": "high_correlation_threshold", "flag": "--high-correlation-threshold", "default": 0.8, "help": "Alert on column pairs with |r| at or above this.", "group": "Correlations", "engines": "both"}, {"name": "max_pk_candidate_pool", "flag": "--max-pk-candidate-pool", "default": 10, "help": "Composite primary-key search: consider this many of the most distinct no-null columns.", "group": "Keys and duplicates", "engines": "pandas"}, {"name": "max_pk_combo_size", "flag": "--max-pk-combo-size", "default": 3, "help": "Composite primary-key search: try combinations of up to this many columns.", "group": "Keys and duplicates", "engines": "pandas"}, {"name": "max_duplicate_column_check", "flag": "--max-duplicate-column-check", "default": 100, "help": "Skip identical-column detection on tables wider than this (every pair is compared).", "group": "Keys and duplicates", "engines": "pandas"}, {"name": "functional_dependencies", "flag": "--functional-dependencies", "default": true, "help": "Search for column A -> column B dependencies (zip -> state).", "group": "Functional dependencies (column A determines column B)", "engines": "pandas"}, {"name": "fd_min_purity", "flag": "--fd-min-purity", "default": 0.98, "help": "Report A -> B when at least this share (0-1) of evidence rows agree with the majority B for their A.", "group": "Functional dependencies (column A determines column B)", "engines": "pandas"}, {"name": "fd_min_support_rows", "flag": "--fd-min-support-rows", "default": 20, "help": "Ignore a pair with fewer evidence rows than this.", "group": "Functional dependencies (column A determines column B)", "engines": "pandas"}, {"name": "max_fd_candidate_pool", "flag": "--max-fd-candidate-pool", "default": 25, "help": "Test at most this many columns as either side (pairs grow with the square).", "group": "Functional dependencies (column A determines column B)", "engines": "pandas"}, {"name": "suggested_references", "flag": "--suggested-references", "default": "auto", "help": "What to do with references datascope suggests itself (same table, from column names): 'check' runs them; 'list' only lists them, with their cost on BigQuery; 'off' skips them. 'auto' = check on pandas, list on BigQuery (where each is an extra query).", "group": "Referential integrity", "engines": "both"}, {"name": "max_reference_suggestions", "flag": "--max-reference-suggestions", "default": 10, "help": "Check or list at most this many suggested references.", "group": "Referential integrity", "engines": "both"}, {"name": "ri_parent_min_unique_pct", "flag": "--ri-parent-min-unique-pct", "default": 99.0, "help": "A suggested reference's target must be an identifier column, with no NULLs and at least this % unique. Below 100 so that duplicate rows don't hide a real key; lower it for messier data.", "group": "Referential integrity", "engines": "both"}, {"name": "ri_suggest_min_match_pct", "flag": "--ri-suggest-min-match-pct", "default": 90.0, "help": "Keep a suggestion only if at least this % of its rows match the target; fewer means it is probably not a reference at all.", "group": "Referential integrity", "engines": "both"}, {"name": "ri_suggest_min_rows", "flag": "--ri-suggest-min-rows", "default": 10, "help": "Don't suggest a reference for a column with fewer non-null rows.", "group": "Referential integrity", "engines": "both"}, {"name": "ri_suggest_min_distinct", "flag": "--ri-suggest-min-distinct", "default": 3, "help": "Don't suggest a reference for a column with fewer distinct values.", "group": "Referential integrity", "engines": "both"}, {"name": "ri_sample_orphans", "flag": "--ri-sample-orphans", "default": 5, "help": "Example orphan values kept per check (the most frequent).", "group": "Referential integrity", "engines": "both"}, {"name": "ri_high_orphan_pct", "flag": "--ri-high-orphan-pct", "default": 5.0, "help": "A declared check with more than this % orphan rows raises a high-severity alert; otherwise a warning.", "group": "Referential integrity", "engines": "both"}, {"name": "distinct_counts", "flag": "--distinct-counts", "default": "keys", "help": "How distinct values are counted. 'keys': approximate counts (HyperLogLog++, about 1% error) for every column, then exact counts only for columns that could be keys (no NULLs and nearly all values unique), in a second query that reads just those columns. Key and reference detection stay exact, without the heavy shuffle (slot time) of an exact COUNT(DISTINCT) on every column. 'exact': exact counts for every column, the heaviest on slots. 'approx': approximate only, the lightest; primary-key detection is then off.", "group": "BigQuery query shape", "engines": "bigquery"}, {"name": "max_columns_per_query", "flag": "--max-columns-per-query", "default": 100, "help": "Split wide tables into profiling queries of at most this many columns.", "group": "BigQuery query shape", "engines": "bigquery"}];
+function setting(name, fallback) {
+  const s = PROFILE.meta && PROFILE.meta.settings;
+  return s && s[name] !== undefined ? s[name] : fallback;
+}
+
+const RUN_STATUS = {
+  ran:              {label: 'ran',            icon: 'check_circle', color: 'var(--green)'},
+  nothing_to_check: {label: 'nothing to do',  icon: 'check_circle', color: 'var(--text-muted)'},
+  partial:          {label: 'partial',        icon: 'contrast',     color: 'var(--amber)'},
+  skipped:          {label: 'skipped',        icon: 'block',        color: 'var(--amber)'},
+  listed:           {label: 'listed',         icon: 'schedule',     color: 'var(--amber)'},
+  not_configured:   {label: 'not set up',     icon: 'add_circle',   color: 'var(--text-muted)'},
+  not_available:    {label: 'not available',  icon: 'do_not_disturb_on', color: 'var(--text-faint)'},
+};
+const EXTENDABLE = ['partial', 'skipped', 'listed'];
+
+function fmtSetting(v) { return typeof v === 'boolean' ? (v ? 'on' : 'off') : String(v); }
+
+function cmdBlock(title, cmd, note) {
+  return '<div class="run-cmd copy-scope"><div class="run-cmd-head"><span>' + esc(title) + '</span>' +
+    '<button class="copy-btn" data-copy>' + icon('content_copy','sm') + 'Copy</button></div>' +
+    '<pre class="code-block"><code>' + esc(cmd.text) + '</code></pre>' +
+    (note ? '<div class="run-cmd-note">' + note + '</div>' : '') + '</div>';
+}
+
+function renderRunSummary() {
+  const meta = PROFILE.meta || {};
+  const checks = meta.checks;
+  if (!checks || !checks.length) return;  // a profile from an older datascope
+  const extendable = checks.filter(c => EXTENDABLE.indexOf(c.status) !== -1);
+  const strip = document.getElementById('run-strip');
+  if (extendable.length) {
+    strip.hidden = false;
+    strip.innerHTML = icon('info', 'sm', 'color:var(--amber)') + '<span>' + extendable.length + ' check' + (extendable.length === 1 ? ' was' : 's were') +
+      ' capped, skipped or only listed in this run: ' + extendable.map(c => esc(c.name)).join(', ') + '.</span>' +
+      '<a href="#run-section" id="run-strip-link">See how to extend it \u2193</a>';
+    document.getElementById('run-strip-link').addEventListener('click', e => { e.preventDefault(); jumpTo('run-section'); });
+  }
+
+  const rows = checks.map(c => {
+    const st = RUN_STATUS[c.status] || RUN_STATUS.ran;
+    const action = (EXTENDABLE.indexOf(c.status) !== -1 && c.flags.length)
+      ? '<span class="run-flags">' + '<code>' + esc(c.flags.join(' ')) + '</code></span>'
+      : (c.hint ? '<span class="run-hint">' + esc(c.hint) + '</span>' : '');
+    return '<tr><td><span class="run-status" style="--sev-color:' + st.color + ';--sev-bg:' + softBg(st.color) + '">' + icon(st.icon, 'sm') + st.label + '</span></td>' +
+      '<td class="run-name">' + esc(c.name) + '</td>' +
+      '<td class="run-detail-cell"><div class="run-detail">' + esc(c.detail) + '</div>' + (action ? '<div style="margin-top:4px">' + action + '</div>' : '') + '</td></tr>';
+  }).join('');
+
+  let html = '<table class="run-table"><tbody>' + rows + '</tbody></table>';
+  const placeholderNote = 'Replace <code>INPUT</code>/<code>PATH:COLUMN</code>: this run was started from Python, so the data had no file name.';
+  if (meta.extend_command) html += cmdBlock('Extend this run', meta.extend_command, (meta.extend_command.complete ? '' : placeholderNote));
+  if (meta.command) html += cmdBlock('Reproduce this run', meta.command, (meta.command.complete ? '' : placeholderNote));
+
+  const used = meta.settings || {};
+  const engine = meta.engine;
+  const changed = SETTINGS_DOC.filter(d => used[d.name] !== undefined && used[d.name] !== d.default).length;
+  let group = null, setRows = '';
+  SETTINGS_DOC.forEach(d => {
+    if (d.group !== group) { group = d.group; setRows += '<tr><td colspan="4" class="set-group">' + esc(group) + '</td></tr>'; }
+    const v = used[d.name];
+    const isChanged = v !== undefined && v !== d.default;
+    const applies = d.engines === 'both' || d.engines === engine;
+    setRows += '<tr class="set-row' + (isChanged ? ' set-changed' : '') + '"' + (applies ? '' : ' style="opacity:.55"') + '>' +
+      '<td><span class="set-flag">' + esc(d.flag) + '</span></td>' +
+      '<td class="set-val">' + esc(v === undefined ? '\u2014' : fmtSetting(v)) + (isChanged ? ' <span class="set-default panel-sub">(default ' + esc(fmtSetting(d.default)) + ')</span>' : '') + '</td>' +
+      '<td class="set-help">' + esc(d.help) + '</td>' +
+      '<td class="set-engine">' + (d.engines === 'both' ? '' : esc(d.engines) + ' only') + '</td></tr>';
+  });
+  html += '<details class="settings"><summary>All settings \u2014 ' + (changed ? changed + ' changed from default' : 'all defaults') +
+    (meta.datascope_version ? ' \u00b7 datascope ' + esc(meta.datascope_version) : '') + '</summary>' +
+    '<table class="run-table" style="margin-top:8px"><tbody>' + setRows + '</tbody></table></details>';
+
+  const body = document.getElementById('run-body');
+  body.innerHTML = html;
+  document.getElementById('run-section').hidden = false;
+  wireCopyButtons(body);
+}
+
+const state = { search: '', sensitiveOnly: false, typeFilters: new Set(), sort: 'name' };
+
+function renderFilterChips() {
+  const dist = PROFILE.overview.type_distribution || {};
+  const types = Object.keys(dist).sort((a,b) => dist[b]-dist[a]);
+  const sensCount = PROFILE.overview.sensitive_columns_count;
+  let html = '';
+  if (sensCount > 0) html += '<button class="chip chip-sensitive" data-filter-sensitive="1">Personal &amp; sensitive <span class="chip-count">' + sensCount + '</span></button>';
+  html += types.map(t => '<button class="chip" data-filter-type="' + esc(t) + '">' + esc(titleCase(t)) + ' <span class="chip-count">' + dist[t] + '</span></button>').join('');
+  document.getElementById('filter-chips').innerHTML = html;
+  document.querySelectorAll('[data-filter-type]').forEach(btn => btn.addEventListener('click', () => {
+    const t = btn.dataset.filterType;
+    if (state.typeFilters.has(t)) { state.typeFilters.delete(t); btn.classList.remove('active'); }
+    else { state.typeFilters.add(t); btn.classList.add('active'); }
+    renderColumnGrid();
+  }));
+  const sensBtn = document.querySelector('[data-filter-sensitive]');
+  if (sensBtn) sensBtn.addEventListener('click', () => {
+    state.sensitiveOnly = !state.sensitiveOnly;
+    sensBtn.classList.toggle('active', state.sensitiveOnly);
+    sensBtn.setAttribute('aria-pressed', String(state.sensitiveOnly));
+    renderColumnGrid();
+  });
+}
+
+function sortColumns(cols, mode) {
+  const arr = cols.slice();
+  if (mode === 'missing') arr.sort((a,b) => b.missing_pct - a.missing_pct);
+  else if (mode === 'unique') arr.sort((a,b) => b.unique_pct - a.unique_pct);
+  else arr.sort((a,b) => a.name.localeCompare(b.name));
+  return arr;
+}
+
+function renderColumnGrid() {
+  const grid = document.getElementById('column-grid');
+  const query = state.search.trim().toLowerCase();
+  let cols = PROFILE.columns.filter(c => {
+    if (state.sensitiveOnly && !c.sensitive.is_sensitive) return false;
+    if (state.typeFilters.size && !state.typeFilters.has(c.semantic_type)) return false;
+    if (query && c.name.toLowerCase().indexOf(query) === -1) return false;
+    return true;
+  });
+  cols = sortColumns(cols, state.sort);
+  document.getElementById('column-count').textContent = cols.length + ' of ' + PROFILE.columns.length + ' columns';
+  if (!cols.length) { grid.innerHTML = '<div class="empty-state">No columns match.</div>'; return; }
+  grid.innerHTML = cols.map((c, i) => {
+    const spec = getChartSpec(c);
+    return '<button class="col-card" style="--i:' + i + '" data-col="' + esc(c.name) + '">' +
+      '<div class="col-card-head">' +
+        '<span class="col-glyph">' + icon(TYPE_ICON[c.semantic_type]||'help', 'xl', 'color:' + (TYPE_COLOR[c.semantic_type]||'var(--text-muted)'), true) + '</span>' +
+        '<span class="col-name" title="' + esc(c.name) + '">' + esc(c.name) + '</span>' +
+        (c.sensitive.is_sensitive ? '<span class="material-symbols-outlined icon icon-sm sens-icon" title="' + esc(sensLabel(c.sensitive)) + '">lock</span>' : '') +
+      '</div>' +
+      '<div class="col-type-label">' + esc(titleCase(c.semantic_type)) + ' \u00b7 ' + esc(c.dtype) + '</div>' +
+      renderBars(spec, 'sm') +
+      '<div class="col-card-caption">' + esc(chartCaption(c, spec)) + '</div>' +
+      '<div class="col-card-foot">' +
+        '<span title="Missing">' + icon('help', 'sm') + '<b>' + fmtPct(c.missing_pct) + '</b> missing</span>' +
+        '<span title="Unique">' + icon('fingerprint', 'sm') + '<b>' + fmtPct(c.unique_pct) + '</b> unique</span>' +
+      '</div>' +
+    '</button>';
+  }).join('');
+  grid.querySelectorAll('.col-card').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.col)));
+  wireTooltips(grid);
+}
+
+function showDashboard() { document.getElementById('view-detail').hidden = true; document.getElementById('view-dashboard').hidden = false; window.scrollTo(0, 0); }
+function openDetail(colName) {
+  const col = PROFILE.columns.find(c => c.name === colName);
+  if (!col) return;
+  renderDetail(col);
+  document.getElementById('view-dashboard').hidden = true;
+  document.getElementById('view-detail').hidden = false;
+  window.scrollTo(0, 0);
+}
+
+function renderQuantileRuler(ns) {
+  if (ns.min === null || ns.max === null || ns.min === ns.max) return '';
+  const range = ns.max - ns.min;
+  const pos = v => ((v - ns.min) / range) * 100;
+  return '<div class="detail-block"><div class="ruler-heading">' + icon('straighten') + 'Quantile ruler</div><div class="ruler-track">' +
+    '<div class="ruler-baseline"></div>' +
+    '<span class="ruler-band" style="left:' + pos(ns.q1) + '%; width:' + (pos(ns.q3)-pos(ns.q1)) + '%"></span>' +
+    '<div class="ruler-mark" style="left:0%"><span class="ruler-mark-line end"></span><span class="ruler-mark-label below">min ' + fmtNum(ns.min) + '</span></div>' +
+    '<div class="ruler-mark" style="left:' + pos(ns.q1) + '%"><span class="ruler-mark-line"></span><span class="ruler-mark-label above">q1 ' + fmtNum(ns.q1) + '</span></div>' +
+    '<div class="ruler-mark" style="left:' + pos(ns.median) + '%"><span class="ruler-mark-line strong"></span><span class="ruler-mark-label above strong">median ' + fmtNum(ns.median) + '</span></div>' +
+    '<div class="ruler-mark" style="left:' + pos(ns.q3) + '%"><span class="ruler-mark-line"></span><span class="ruler-mark-label above">q3 ' + fmtNum(ns.q3) + '</span></div>' +
+    '<div class="ruler-mark" style="left:100%"><span class="ruler-mark-line end"></span><span class="ruler-mark-label below">max ' + fmtNum(ns.max) + '</span></div>' +
+    '</div></div>';
+}
+
+function renderTopValuesBlock(col) {
+  const tv = col.top_values || [];
+  const heading = '<div class="ruler-heading">' + icon('leaderboard') + 'Top values</div>';
+  if (!tv.length) return '<div class="detail-block">' + heading + '<div class="empty-state">No values.</div></div>';
+  const max = Math.max(...tv.map(v => v.pct), 1);
+  const rows = tv.map(v => '<div class="tv-row"><span class="tv-label" title="' + esc(v.value) + '">' + esc(v.value) + '</span><span class="tv-bar-track"><span class="tv-bar-fill" style="width:' + (v.pct/max*100) + '%"></span></span><span class="tv-pct">' + fmtPct(v.pct) + '</span></div>').join('');
+  return '<div class="detail-block">' + heading + '<div class="tv-list">' + rows + '</div></div>';
+}
+function renderQualityRulesBlock(col) {
+  const rules = col.quality_rules || [];
+  const heading = '<div class="ruler-heading">' + icon('checklist') + 'Quality rules</div>';
+  if (!rules.length) return '<div class="detail-block">' + heading + '<div class="empty-state">' + icon('check_circle','sm') + ' Nothing to suggest.</div></div>';
+  const rows = rules.map(r => '<div class="rule-row" style="--sev-color:' + (SEVERITY_COLOR[r.severity]||'var(--border)') + '"><span class="rule-glyph">' + icon(SEVERITY_ICON[r.severity]||'info', 'sm') + '</span><span class="rule-desc">' + esc(r.description) + '</span></div>').join('');
+  return '<div class="detail-block">' + heading + '<div class="rule-list">' + rows + '</div></div>';
+}
+function renderDbtBlock(snippet) {
+  return '<div class="detail-block dbt-block"><div class="ruler-heading dbt-heading-row"><span class="row-icon">' + icon('code') + 'dbt schema.yml</span><button class="copy-btn" data-copy>' + icon('content_copy','sm') + 'Copy</button></div><pre class="code-block"><code>' + esc(snippet) + '</code></pre></div>';
+}
+function wireCopyButtons(root) {
+  root.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const code = btn.closest('.dbt-block, .copy-scope').querySelector('code');
+      const text = code.textContent;
+      const done = () => { const orig = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = orig, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => {});
+    });
+  });
+}
+
+function renderDetail(col) {
+  const el = document.getElementById('detail-content');
+  const parts = [];
+  parts.push('<div class="detail-header"><div class="detail-title-row">' +
+    '<span class="col-glyph large">' + icon(TYPE_ICON[col.semantic_type]||'help', 'lg', 'color:' + (TYPE_COLOR[col.semantic_type]||'var(--text-muted)'), true) + '</span>' +
+    '<h1 class="detail-name">' + esc(col.name) + '</h1></div>' +
+    '<div class="detail-badges">' +
+      '<span class="badge" style="--badge-color:' + (TYPE_COLOR[col.semantic_type]||'var(--text-muted)') + ';--badge-bg:' + softBg(TYPE_COLOR[col.semantic_type]||'var(--text-muted)') + '">' + esc(titleCase(col.semantic_type)) + ' \u00b7 ' + Math.round(col.semantic_type_confidence*100) + '%</span>' +
+      '<span class="badge">' + esc(col.dtype) + '</span>' +
+      (col.sensitive.is_sensitive ? '<span class="badge" style="--badge-color:var(--violet);--badge-bg:var(--violet-soft)">' + esc(sensLabel(col.sensitive)) + ' \u00b7 ' + Math.round(col.sensitive.confidence*100) + '% confidence</span>' : '') +
+    '</div>' +
+    (col.sensitive.is_sensitive ? '<p class="detail-why"><b>Why it looks like ' + esc(sensGroup(col.sensitive).toLowerCase()) + ':</b> ' +
+      esc((col.sensitive.reasons || []).join(' ') || 'Flagged by ' + (col.sensitive.detected_by || []).join(' and ').replace(/_/g, ' ') + '.') +
+      ' Its values are masked in this report.</p>' : '') +
+    (col.semantic_notes && col.semantic_notes.length ? '<p class="detail-note">' + col.semantic_notes.map(esc).join(' ') + '</p>' : '') +
+  '</div>');
+
+  const stats = [
+    ['Count', fmtInt(col.count), 'tag'], ['Missing', fmtInt(col.missing) + ' (' + fmtPct(col.missing_pct) + ')', 'help'],
+    ['Unique', fmtInt(col.unique) + ' (' + fmtPct(col.unique_pct) + ')', 'fingerprint'], ['Memory', fmtBytes(col.memory_bytes), 'storage'],
+  ];
+  if (col.numeric_stats) {
+    const ns = col.numeric_stats;
+    stats.push(['Mean', fmtNum(ns.mean), 'functions'], ['Std dev', fmtNum(ns.std), 'query_stats'], ['Min', fmtNum(ns.min), 'south'], ['Max', fmtNum(ns.max), 'north'],
+      ['Zeros', fmtInt(ns.zeros) + ' (' + fmtPct(ns.zeros_pct) + ')', 'exposure_zero'], ['Negatives', fmtInt(ns.negatives), 'exposure_neg_1'],
+      ['Skewness', fmtNum(ns.skewness), 'insights'], ['Outliers (1.5\u00d7IQR)', fmtInt(ns.outlier_count) + ' (' + fmtPct(ns.outlier_pct) + ')', 'report_problem']);
+    if (ns.infinite_count) stats.push(['Infinite values', fmtInt(ns.infinite_count), 'warning']);
+  }
+  if (col.string_stats) {
+    const ss = col.string_stats;
+    stats.push(['Min length', fmtInt(ss.min_length), 'south'], ['Max length', fmtInt(ss.max_length), 'north'], ['Mean length', fmtNum(ss.mean_length), 'straighten'], ['Empty/whitespace', fmtInt(ss.empty_or_whitespace), 'remove_circle']);
+  }
+  if (col.datetime_stats) {
+    const ds = col.datetime_stats;
+    stats.push(['Earliest', ds.min_date ? ds.min_date.slice(0,10) : '\u2014', 'event'], ['Latest', ds.max_date ? ds.max_date.slice(0,10) : '\u2014', 'event'], ['Range', fmtInt(ds.range_days) + ' days', 'date_range'], ['Future-dated', fmtInt(ds.future_dates), 'schedule']);
+  }
+  if (col.boolean_stats) {
+    const bs = col.boolean_stats;
+    stats.push(['True', fmtInt(bs.true_count) + ' (' + fmtPct(bs.true_pct) + ')', 'check_circle'], ['False', fmtInt(bs.false_count), 'cancel']);
+  }
+  parts.push('<div class="stat-grid">' + stats.map(([k,v,ic]) => '<div class="stat-cell"><div class="stat-cell-head">' + icon(ic||'chevron_right', 'sm') + '<div class="stat-label">' + esc(k) + '</div></div><div class="stat-value">' + esc(v) + '</div></div>').join('') + '</div>');
+
+  if (col.numeric_stats) parts.push(renderQuantileRuler(col.numeric_stats));
+  const spec = getChartSpec(col);
+  parts.push('<div class="detail-block"><div class="ruler-heading">Distribution</div>' + renderBars(spec, 'lg') + '</div>');
+  parts.push('<div class="detail-two-col">' + renderTopValuesBlock(col) + renderQualityRulesBlock(col) + '</div>');
+  if (col.dbt_snippet) parts.push(renderDbtBlock(col.dbt_snippet));
+
+  el.innerHTML = parts.join('');
+  wireCopyButtons(el);
+  wireTooltips(el);
+}
+
+document.getElementById('search-input').addEventListener('input', e => { state.search = e.target.value; renderColumnGrid(); });
+document.getElementById('sort-select').addEventListener('change', e => { state.sort = e.target.value; renderColumnGrid(); });
+document.getElementById('back-btn').addEventListener('click', showDashboard);
+
+renderHeader();
+renderHero();
+renderQuality();
+renderSensitive();
+renderTypeDistribution();
+renderCorrelation();
+renderMissingCorr();
+renderPkCandidates();
+renderFunctionalDependencies();
+renderReferentialIntegrity();
+renderRunSummary();
+renderFilterChips();
+renderColumnGrid();
+</script>
+</body>
+</html>
