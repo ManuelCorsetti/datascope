@@ -59,6 +59,11 @@ class Settings:
               "numbers, ID and card numbers...). Larger = slower, fewer misses.", "general", PANDAS, minimum=1,
         flag="--sample-size")
     random_state: int = _s(42, "Seed for that sample, so reruns flag the same columns.", "general", PANDAS)
+    sensitive_min_match_pct: float = _s(
+        1.0, "Flag a column as personal or sensitive data when at least this %% of its sampled values match a "
+             "pattern (email address, phone, ID, card or bank account number), whole or, for emails and dashed "
+             "ID numbers, inside text. Low by default: a column that is only partly personal data still holds "
+             "personal data. Column names are checked regardless.", "general", PANDAS, minimum=0, maximum=100)
 
     # ------------------------------------------------------------ alerts
     missing_warning_pct: float = _s(20.0, "A column with more than this %% missing raises a warning.", "alerts",
@@ -68,8 +73,9 @@ class Settings:
     outlier_alert_pct: float = _s(5.0, "Alert when more than this %% of a numeric column is outside 1.5x IQR.",
                                   "alerts", PANDAS, minimum=0, maximum=100)
     sensitive_alert_min_confidence: float = _s(
-        0.7, "Raise an alert for a column that looks like personal or sensitive data only at or above this "
-             "detection confidence (0-1). Columns below it are still flagged and masked, just without an alert.",
+        0.0, "Raise an alert for a column that looks like personal or sensitive data only at or above this "
+             "detection confidence (0-1). The default 0 alerts on every flagged column; raise it to alert only "
+             "on the clearest cases. Flagged columns are masked either way.",
         "alerts", minimum=0, maximum=1)
 
     # ------------------------------------------------------ correlations

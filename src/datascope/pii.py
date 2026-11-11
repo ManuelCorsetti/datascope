@@ -79,14 +79,30 @@ NAME_PATTERNS: Dict[str, Tuple[str, List[str]]] = {
 # The phone pattern excludes bare ISO-date shapes (YYYY-MM-DD) via a
 # negative lookahead — otherwise a plain date column serialized to text
 # ("2024-10-11") is digit-dash-shaped enough to look like a phone number.
+# Order matters for ties (equal scores go to the first listed): the
+# national-ID shape is a special case of the looser phone shape, so it
+# comes first.
 CONTENT_PATTERNS: Dict[str, Tuple[re.Pattern, str]] = {
     "email": (re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$"), "PII"),
-    "phone": (re.compile(r"^(?!\d{4}-\d{2}-\d{2}$)\+?[\d][\d\-.\s()]{7,16}\d$"), "PII"),
     "national_id": (re.compile(r"^\d{3}-?\d{2}-?\d{4}$"), "PII"),
+    "phone": (re.compile(r"^(?!\d{4}-\d{2}-\d{2}$)\+?[\d][\d\-.\s()]{7,16}\d$"), "PII"),
     "ip_address": (re.compile(r"^(\d{1,3}\.){3}\d{1,3}$"), "PII"),
     "credit_card": (re.compile(r"^[\d\-\s]{13,23}$"), "PCI"),
     "bank_account": (re.compile(r"^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$"), "PCI"),
 }
+
+# Patterns specific enough to look for *inside* free text ("call me at
+# ann@x.com"), not just as the whole value. Looser shapes (phone numbers,
+# undashed IDs) stay whole-value only: numbers in prose are too common.
+EMBEDDED_PATTERNS: Dict[str, re.Pattern] = {
+    "email": re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}(?![\w-])"),
+    "national_id": re.compile(r"(?<![\d-])\d{3}-\d{2}-\d{4}(?![\d-])"),
+}
+
+# Default share of sampled values that must match a pattern for a column
+# to be flagged (Settings.sensitive_min_match_pct). Deliberately low:
+# a column that is only partly personal data still holds personal data.
+DEFAULT_MIN_MATCH_RATE = 0.01
 
 # Plain-language names used in the report, alerts and reasons.
 GROUP_LABELS: Dict[str, str] = {"PII": "Personal data", "PHI": "Health data", "PCI": "Payment data"}
@@ -99,7 +115,6 @@ TYPE_LABELS: Dict[str, str] = {
     "credit_card": "credit card number", "bank_account": "bank account number",
 }
 
-CONTENT_MATCH_THRESHOLD = 0.6
 NAME_WEIGHT = 0.55
 CONTENT_WEIGHT = 0.5
 # A passed checksum (currently: Luhn for credit cards) is real corroborating
@@ -126,6 +141,20 @@ def _luhn_valid(number_str: str) -> bool:
     return checksum % 10 == 0
 
 
+def _iban_valid(value: str) -> bool:
+    """ISO 13616 mod-97 check: random codes that merely look like an IBAN
+    (two letters, two digits, ...) almost always fail it."""
+    s = value.replace(" ", "").upper()
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", s):
+        return False
+    rearranged = s[4:] + s[:4]
+    digits = "".join(str(int(ch, 36)) for ch in rearranged)
+    return int(digits) % 97 == 1
+
+
+_VALIDATORS = {"credit_card": _luhn_valid, "bank_account": _iban_valid}
+
+
 def _match_name(col_name: str) -> List[Tuple[str, str]]:
     normalized = re.sub(r"[^a-z0-9]+", "_", col_name.lower()).strip("_")
     matches = []
@@ -137,8 +166,10 @@ def _match_name(col_name: str) -> List[Tuple[str, str]]:
     return matches
 
 
-def _match_content(series: pd.Series, sample_size: int,
-                   random_state: int) -> List[Tuple[str, str, float, bool, int]]:
+def _match_content(series: pd.Series, sample_size: int, random_state: int,
+                   min_match_rate: float = DEFAULT_MIN_MATCH_RATE) -> List[Tuple[str, str, float, bool, int, bool]]:
+    """-> (category, group, match rate, checksum-validated, values sampled,
+    found inside text rather than as the whole value) per matching pattern."""
     non_null = series.dropna().astype(str).str.strip()
     non_null = non_null[non_null != ""]
     if non_null.empty:
@@ -147,28 +178,35 @@ def _match_content(series: pd.Series, sample_size: int,
 
     results = []
     for category, (regex, group) in CONTENT_PATTERNS.items():
-        matched = sample.apply(lambda v: bool(regex.match(v)))
-        rate = float(matched.mean())
-        if rate < CONTENT_MATCH_THRESHOLD:
+        whole = sample.apply(lambda v: bool(regex.match(v)))
+        inside = pd.Series(False, index=sample.index)
+        if category in EMBEDDED_PATTERNS:
+            pattern = EMBEDDED_PATTERNS[category]
+            inside = ~whole & sample.apply(lambda v: bool(pattern.search(v)))
+        rate = float((whole | inside).mean())
+        if rate == 0 or rate < min_match_rate:
             continue
         validated = False
-        if category == "credit_card":
-            candidates = sample[matched]
-            luhn_rate = float(candidates.apply(_luhn_valid).mean()) if len(candidates) else 0.0
-            if luhn_rate < 0.5:
-                continue  # digit-shaped but fails checksum -> probably just another ID, not a card
+        if category in _VALIDATORS:
+            candidates = sample[whole]
+            valid_rate = float(candidates.apply(_VALIDATORS[category]).mean()) if len(candidates) else 0.0
+            if valid_rate < 0.5:
+                continue  # the right shape but fails the checksum -> probably just another code
             validated = True
-        results.append((category, group, round(rate, 3), validated, len(sample)))
+        results.append((category, group, round(rate, 3), validated, len(sample), bool(inside.sum() > whole.sum())))
     return results
 
 
 def detect_sensitive_data(series: pd.Series, col_name: str, sample_size: int = 1000,
-                           random_state: int = 42, skip_content: bool = False) -> Dict[str, Any]:
+                           random_state: int = 42, skip_content: bool = False,
+                           min_match_rate: float = DEFAULT_MIN_MATCH_RATE) -> Dict[str, Any]:
     """skip_content: set True for columns already known (from semantic
     typing) to be datetime or boolean — their string form isn't
-    meaningful input for these content regexes, only the column name is."""
+    meaningful input for these content regexes, only the column name is.
+    min_match_rate: share of sampled values (0-1) that must match a
+    pattern for the values alone to flag the column."""
     name_matches = _match_name(col_name)
-    content_matches = [] if skip_content else _match_content(series, sample_size, random_state)
+    content_matches = [] if skip_content else _match_content(series, sample_size, random_state, min_match_rate)
 
     if not name_matches and not content_matches:
         return {"is_sensitive": False, "category": None, "type": None, "confidence": 0.0, "detected_by": [],
@@ -180,12 +218,12 @@ def detect_sensitive_data(series: pd.Series, col_name: str, sample_size: int = 1
         entry["score"] += NAME_WEIGHT
         entry["by"].add("column_name")
 
-    content_detail: Dict[str, Tuple[float, bool, int]] = {}
-    for category, group, rate, validated, n_sampled in content_matches:
+    content_detail: Dict[str, Tuple[float, bool, int, bool]] = {}
+    for category, group, rate, validated, n_sampled, inside_text in content_matches:
         entry = scores.setdefault(category, {"group": group, "score": 0.0, "by": set()})
         entry["score"] += CONTENT_WEIGHT * rate + (CHECKSUM_VALIDATED_BONUS if validated else 0.0)
         entry["by"].add("content_pattern")
-        content_detail[category] = (rate, validated, n_sampled)
+        content_detail[category] = (rate, validated, n_sampled, inside_text)
 
     best_key = max(scores, key=lambda k: scores[k]["score"])
     best = scores[best_key]
@@ -216,9 +254,11 @@ def _reasons(category: str, by: Any, content: Any) -> List[str]:
     if "column_name" in by:
         reasons.append(f"Its name suggests it holds {label}.")
     if "content_pattern" in by and content:
-        rate, validated, n_sampled = content
-        reasons.append(f"{round(rate * 100)}% of {n_sampled:,} sampled values have the format of {label}"
-                       + (" and pass the card-number checksum." if validated else "."))
+        rate, validated, n_sampled, inside_text = content
+        pct = f"{rate * 100:.0f}%" if rate >= 0.01 else f"{rate * 100:.1f}%"
+        what = f"contain {label}" if inside_text else f"have the format of {label}"
+        reasons.append(f"{pct} of {n_sampled:,} sampled values {what}"
+                       + (" and pass its checksum." if validated else "."))
     return reasons
 
 

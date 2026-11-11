@@ -273,6 +273,7 @@ from Python rather than a file, the command uses an `INPUT` placeholder.
 | `--histogram-bins` / `histogram_bins` | `30` | pandas | Bars in each numeric histogram. |
 | `--sample-size` / `sample_size_for_content_checks` | `1000` | pandas | Rows sampled per column when checking values for personal or sensitive data (emails, phone numbers, ID and card numbers...). Larger = slower, fewer misses. |
 | `--random-state` / `random_state` | `42` | pandas | Seed for that sample, so reruns flag the same columns. |
+| `--sensitive-min-match-pct` / `sensitive_min_match_pct` | `1` | pandas | Flag a column as personal or sensitive data when at least this % of its sampled values match a pattern (email address, phone, ID, card or bank account number), whole or, for emails and dashed ID numbers, inside text. Low by default: a column that is only partly personal data still holds personal data. Column names are checked regardless. |
 
 **Alert thresholds**
 
@@ -281,7 +282,7 @@ from Python rather than a file, the command uses an `INPUT` placeholder.
 | `--missing-warning-pct` / `missing_warning_pct` | `20` | both | A column with more than this % missing raises a warning. |
 | `--missing-high-pct` / `missing_high_pct` | `50` | both | A column with more than this % missing raises a high-severity alert. |
 | `--outlier-alert-pct` / `outlier_alert_pct` | `5` | pandas | Alert when more than this % of a numeric column is outside 1.5x IQR. |
-| `--sensitive-alert-min-confidence` / `sensitive_alert_min_confidence` | `0.7` | both | Raise an alert for a column that looks like personal or sensitive data only at or above this detection confidence (0-1). Columns below it are still flagged and masked, just without an alert. |
+| `--sensitive-alert-min-confidence` / `sensitive_alert_min_confidence` | `0` | both | Raise an alert for a column that looks like personal or sensitive data only at or above this detection confidence (0-1). The default 0 alerts on every flagged column; raise it to alert only on the clearest cases. Flagged columns are masked either way. |
 
 **Correlations**
 
@@ -346,11 +347,17 @@ report records the datascope version, which pins them.
   ≤ 50 distinct values or < 10% unique → categorical; otherwise
   high-cardinality text.
 - **Personal & sensitive data detection** (`pii.py`, see above): a column is flagged when its name
-  matches a keyword list, or when ≥ 60% of the sampled values match a
-  pattern (email, phone, national ID, IP address, credit card with a Luhn
-  check, IBAN). Its confidence is 0.55 for a name match plus 0.5 × the
+  matches a keyword list, or when at least `--sensitive-min-match-pct`
+  (default 1%) of the sampled values match a pattern: email, national ID,
+  phone, IP address, credit card (Luhn checksum) or IBAN (mod-97
+  checksum). Emails and dashed ID numbers also count when they appear
+  inside free text. Its confidence is 0.55 for a name match plus 0.5 × the
   value match rate (+0.05 for a passed checksum), capped at 0.99;
-  `--sensitive-alert-min-confidence` applies to that number.
+  `--sensitive-alert-min-confidence` (default 0: every flagged column
+  alerts) applies to that number. A bare 9- or 10-digit number has the
+  same shape as an undashed SSN or a phone number, so ID-like numbers
+  stored as text can be flagged; the stated reason makes that easy to
+  spot.
 - **Quality-rule suggestions** (`quality.py`): accepted values when the
   top values cover ≥ 99% of rows; an outlier review when > 1% of values
   are outside 1.5× IQR; a non-negative check when the name contains
@@ -380,8 +387,11 @@ report records the datascope version, which pins them.
   numbers, dates of birth), *health data* (PHI: medical records,
   diagnoses, medication) or *payment data* (PCI: card and bank account
   numbers). It checks the column name, and a sample of values against
-  patterns (email, phone, national ID, IP address, credit card with a
-  Luhn checksum, IBAN). The report's "Personal & sensitive data" panel
+  patterns (email, phone, national ID, IP address, credit card and IBAN,
+  both checksum-validated). Even a column where only a few values match
+  is flagged (`--sensitive-min-match-pct`, default 1%), as is free text
+  that contains email addresses or ID numbers, and every flagged column
+  raises an alert. The report's "Personal & sensitive data" panel
   lists each flagged column with the reason, e.g. "98% of 1,000 sampled
   values have the format of an email address", and the values of flagged
   columns are masked everywhere in the report. It is pattern matching to

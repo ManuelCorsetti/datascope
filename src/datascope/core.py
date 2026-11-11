@@ -216,6 +216,7 @@ class DataProfiler:
 
         sensitive = detect_sensitive_data(
             series, col, sample_size=self.sample_size_for_content_checks, random_state=self.random_state,
+            min_match_rate=self.settings.sensitive_min_match_pct / 100,
             # continuous_numeric measures (price, temperature, ...) are
             # skipped too: their str() form is a decimal expansion that
             # incidentally satisfies digit-plus-separator content regexes
