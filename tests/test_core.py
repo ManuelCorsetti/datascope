@@ -38,11 +38,10 @@ class TestProfileStructure:
         assert len(result["columns"]) == len(sample_df.columns)
         assert {c["name"] for c in result["columns"]} == set(sample_df.columns)
 
-    def test_quality_score_in_range(self, sample_df):
+    def test_no_composite_quality_score(self, sample_df):
+        # Deliberately removed: a blended score hid which dimension was bad.
         result = DataProfiler().profile(sample_df)
-        score = result["overview"]["quality_score"]
-        assert score is not None
-        assert 0.0 <= score <= 100.0
+        assert "quality_score" not in result["overview"]
 
     def test_id_column_detected_as_pk_candidate(self, sample_df):
         result = DataProfiler().profile(sample_df)

@@ -1,4 +1,4 @@
-from datascope.quality import compute_quality_score, generate_dbt_snippet, recommend_rules
+from datascope.quality import generate_dbt_snippet, recommend_rules
 
 NOT_SENSITIVE = {"is_sensitive": False, "category": None, "type": None, "confidence": 0.0, "detected_by": []}
 SENSITIVE = {"is_sensitive": True, "category": "PII", "type": "email", "confidence": 0.9, "detected_by": ["column_name"]}
@@ -80,34 +80,3 @@ class TestDbtSnippet:
         snippet = generate_dbt_snippet(col)
         assert snippet is None or "accepted_range" not in snippet
 
-
-class TestQualityScore:
-    def _profile(self, cols, n_rows=100, missing_pct=0.0, dup_pct=0.0):
-        return {
-            "columns": cols,
-            "meta": {"n_rows": n_rows, "duplicate_rows_pct": dup_pct},
-            "overview": {"total_missing_pct": missing_pct},
-        }
-
-    def test_perfect_data_scores_100(self):
-        cols = [_col(semantic_type="continuous_numeric") for _ in range(5)]
-        score = compute_quality_score(self._profile(cols))
-        assert score == 100.0
-
-    def test_missing_values_lower_score(self):
-        cols = [_col() for _ in range(5)]
-        score = compute_quality_score(self._profile(cols, missing_pct=50.0))
-        assert score < 100.0
-
-    def test_constant_columns_lower_structure_score(self):
-        cols = [_col(semantic_type="constant") for _ in range(5)]
-        score = compute_quality_score(self._profile(cols))
-        assert score < 100.0
-
-    def test_empty_dataset_returns_none(self):
-        assert compute_quality_score(self._profile([], n_rows=0)) is None
-
-    def test_score_bounded_0_to_100(self):
-        cols = [_col(semantic_type="constant") for _ in range(5)]
-        score = compute_quality_score(self._profile(cols, missing_pct=100.0, dup_pct=100.0))
-        assert 0.0 <= score <= 100.0

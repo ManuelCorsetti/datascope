@@ -117,8 +117,8 @@ total rows; per column nulls, distinct count and top values; numeric
 min / max / mean / std / sum / quartiles (median), zeros, negatives;
 string length stats and blank count; date range, future-dated values and
 weekday split; boolean true/false split. Semantic types, quality rules,
-dbt snippets, single-column primary-key candidates, alerts and the
-quality score are derived from those, as usual.
+dbt snippets, single-column primary-key candidates and alerts are
+derived from those, as usual.
 
 **Things to know**
 
@@ -165,7 +165,9 @@ quality score are derived from those, as usual.
 
 ## Dataset-level
 
-- Quality score (0–100, shown with its components, not just the number)
+- A **data quality** section that keeps table-level checks (completeness,
+  duplicate rows) apart from column-level checks (columns with missing
+  values, constant columns), each with its own alerts — no blended score
 - Numeric correlation matrix and a **missing-value correlation matrix**
   (which columns tend to be null together — useful for spotting a shared
   upstream cause)

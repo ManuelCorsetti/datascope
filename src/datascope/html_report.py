@@ -142,15 +142,6 @@ section { margin-bottom: 22px; }
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
 .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 16px 18px; box-shadow: var(--shadow); animation: rise 0.4s ease both; animation-delay: calc(var(--i, 0) * 50ms); }
-.kpi-card-score { display: flex; flex-direction: column; align-items: center; text-align: center; justify-content: center; }
-.score-ring-wrap { position: relative; width: 92px; height: 92px; }
-.score-ring { width: 92px; height: 92px; transform: rotate(-90deg); }
-.score-ring-bg { fill: none; stroke: var(--surface-2); stroke-width: 9; }
-.score-ring-fill { fill: none; stroke: var(--teal); stroke-width: 9; stroke-linecap: round;
-  transition: stroke-dashoffset 0.9s cubic-bezier(.4,0,.2,1); }
-.score-value { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: 24px; font-weight: 600; }
-.kpi-card-label { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-top: 8px; }
 .kpi-icon-badge { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; background: var(--badge-bg, var(--surface-2)); }
 .kpi-icon-badge .icon { color: var(--badge-color, var(--text-muted)); }
 .kpi-value { font-family: var(--font-mono); font-size: 22px; font-weight: 600; }
@@ -160,9 +151,10 @@ section { margin-bottom: 22px; }
 .kpi-link:hover { transform: translateY(-2px); border-color: var(--teal); }
 .kpi-link-arrow { position: absolute; top: 14px; right: 14px; color: var(--text-faint); transition: color .15s ease, transform .15s ease; }
 .kpi-link:hover .kpi-link-arrow, .kpi-link:focus-visible .kpi-link-arrow { color: var(--teal); transform: translateY(2px); }
-#alerts-panel, #columns-section { scroll-margin-top: 76px; }
+#dq-section, #columns-section { scroll-margin-top: 76px; }
 @keyframes flash { from { box-shadow: 0 0 0 3px var(--teal); } to { box-shadow: 0 0 0 3px transparent; } }
 .flash { animation: flash 1.4s ease-out; border-radius: var(--radius); }
+.kpi-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
 .kpi-bar { margin-top: 10px; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .kpi-bar span { display: block; height: 100%; border-radius: 2px; transition: width 0.6s ease; }
 
@@ -171,9 +163,30 @@ section { margin-bottom: 22px; }
 .alert-glyph { color: var(--sev-color, var(--text-muted)); font-size: 12px; margin-top: 2px; flex-shrink: 0; }
 .alert-msg { font-size: 13.5px; color: var(--text); }
 .alert-col { font-family: var(--font-mono); color: var(--text); font-weight: 600; }
+.alert-col-link { font-family: var(--font-mono); font-weight: 600; color: var(--teal); background: none; border: none; padding: 0; cursor: pointer; font-size: inherit; }
+.alert-col-link:hover { text-decoration: underline; }
+.dq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.dq-scope { min-width: 0; padding: 4px 0; }
+.dq-scope + .dq-scope { border-left: 1px solid var(--border); padding-left: 22px; margin-left: 22px; }
+@media (max-width: 880px) {
+  .dq-grid { grid-template-columns: 1fr; }
+  .dq-scope + .dq-scope { border-left: none; margin-left: 0; padding-left: 0; border-top: 1px solid var(--border); margin-top: 18px; padding-top: 18px; }
+}
+.dq-scope-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.scope-tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  padding: 4px 10px 4px 8px; border-radius: 999px; }
+.scope-tag .icon { color: var(--teal); }
+.scope-desc { font-size: 12.5px; color: var(--text-muted); }
+.dq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.dq-tiles .kpi-card { box-shadow: none; }
+.dq-alerts-head { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
+  font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.dq-alerts-head .count { color: var(--text-faint); font-weight: 400; }
 .alert-empty, .empty-state { color: var(--text-faint); font-size: 13px; padding: 6px 0; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.two-col > * { min-width: 0; }  /* let wide heatmaps scroll inside their panel instead of widening the page */
 @media (max-width: 880px) { .two-col { grid-template-columns: 1fr; } }
 
 .dist-row { display: grid; grid-template-columns: 150px 1fr 40px; align-items: center; gap: 10px; padding: 5px 0; font-size: 12.5px; }
@@ -321,19 +334,15 @@ table.heatmap th { padding: 4px 6px; }
 
 <main id="view-dashboard" class="view">
   <section class="kpi-grid" id="kpi-grid">
-    <div class="kpi-card kpi-card-score">
-      <div class="score-ring-wrap">
-        <svg class="score-ring" viewBox="0 0 120 120">
-          <circle class="score-ring-bg" cx="60" cy="60" r="52"></circle>
-          <circle class="score-ring-fill" id="score-ring-fill" cx="60" cy="60" r="52"></circle>
-        </svg>
-        <div class="score-value" id="score-value">&mdash;</div>
-      </div>
-      <div class="kpi-card-label">Quality score</div>
-    </div>
   </section>
 
-  <section class="panel" id="alerts-panel"></section>
+  <section class="panel" id="dq-section">
+    <div class="panel-title"><span class="material-symbols-outlined icon">fact_check</span>Data quality</div>
+    <div class="dq-grid">
+      <div class="dq-scope" id="dq-table"></div>
+      <div class="dq-scope" id="dq-column"></div>
+    </div>
+  </section>
 
   <section class="two-col">
     <div class="panel">
@@ -400,7 +409,6 @@ function fmtPct(n, digits) { if (n === null || n === undefined) return '\u2014';
 function fmtNum(n) { if (n === null || n === undefined) return '\u2014'; if (Number.isInteger(n)) return fmtInt(n); return Number(n).toLocaleString('en-US', {maximumFractionDigits: 3}); }
 function fmtBytes(n) { if (n === null || n === undefined) return '\u2014'; if (n < 1024) return n + ' B'; if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB'; return (n/1024/1024).toFixed(2) + ' MB'; }
 function titleCase(s) { return String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
-function scoreColor(score) { if (score === null || score === undefined) return 'var(--text-muted)'; if (score >= 80) return 'var(--green)'; if (score >= 50) return 'var(--amber)'; return 'var(--coral)'; }
 
 const TYPE_COLOR = {
   identifier: 'var(--teal)', continuous_numeric: 'var(--teal)',
@@ -511,67 +519,113 @@ function renderHeader() {
   document.title = 'Data Profile \u2014 ' + PROFILE.meta.source_name;
 }
 
-function renderHero() {
-  const score = PROFILE.overview.quality_score;
-  const r = 52, circ = 2 * Math.PI * r;
-  const fillEl = document.getElementById('score-ring-fill');
-  fillEl.style.strokeDasharray = circ.toFixed(2);
-  fillEl.style.strokeDashoffset = circ.toFixed(2);
-  fillEl.style.stroke = scoreColor(score);
-  document.getElementById('score-value').textContent = (score === null || score === undefined) ? '\u2014' : score;
-  document.getElementById('score-value').style.color = scoreColor(score);
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    const pct = (score === null || score === undefined) ? 0 : score/100;
-    fillEl.style.strokeDashoffset = (circ * (1 - pct)).toFixed(2);
-  }));
+// One KPI tile. `t.link` names a KPI_LINKS entry; tiles with nothing to
+// drill into stay static rather than linking somewhere that doesn't
+// explain the number.
+function kpiTile(t, i) {
+  const link = t.link && KPI_LINKS[t.link];
+  const inner =
+    '<div class="kpi-icon-badge" style="--badge-color:' + t.color + ';--badge-bg:' + softBg(t.color) + '">' + icon(t.iconName, 'xl', null, true) + '</div>' +
+    '<div class="kpi-value">' + esc(t.value) + '</div>' +
+    '<div class="kpi-label">' + esc(t.label) + '</div>' +
+    (t.sub ? '<div class="kpi-sub">' + esc(t.sub) + '</div>' : '') +
+    (t.bar !== undefined ? '<div class="kpi-bar"><span style="width:' + t.bar + '%; background:' + t.barColor + '"></span></div>' : '');
+  if (!link) return '<div class="kpi-card" style="--i:' + (i+1) + '">' + inner + '</div>';
+  return '<button type="button" class="kpi-card kpi-link" style="--i:' + (i+1) + '" data-kpi-link="' + t.link + '" title="' + esc(link.hint) + '">' +
+    '<span class="kpi-link-arrow">' + icon('arrow_downward', 'sm') + '</span>' + inner + '</button>';
+}
+function wireKpiLinks(root) {
+  root.querySelectorAll('[data-kpi-link]').forEach(btn => btn.addEventListener('click', () => KPI_LINKS[btn.dataset.kpiLink].go()));
+}
 
+function renderHero() {
   const m = PROFILE.meta, o = PROFILE.overview;
-  const completeness = Math.max(0, 100 - o.total_missing_pct);
-  const alertCount = (o.alerts || []).length;
-  const completenessColor = completeness > 90 ? 'var(--green)' : completeness > 70 ? 'var(--amber)' : 'var(--coral)';
   const nCols = (PROFILE.columns || []).length;
-  // `link` names a KPI_LINKS entry; tiles with nothing to drill into
-  // (rows, duplicates, memory) stay static rather than linking somewhere
-  // that doesn't explain the number.
   const tiles = [
     {label: 'Rows', value: fmtInt(m.n_rows), iconName: 'table_rows', color: 'var(--teal)'},
     {label: 'Columns', value: fmtInt(m.n_cols), iconName: 'view_column', color: 'var(--teal)', link: nCols > 0 ? 'columns' : null},
-    {label: 'Completeness', value: fmtPct(completeness), bar: completeness, barColor: completenessColor, iconName: 'task_alt', color: completenessColor, link: o.total_missing_pct > 0 ? 'missing' : null},
-    {label: 'Duplicate rows', value: fmtInt(m.duplicate_rows) + (m.duplicate_rows_pct ? ' (' + fmtPct(m.duplicate_rows_pct) + ')' : ''), iconName: 'content_copy', color: m.duplicate_rows > 0 ? 'var(--amber)' : 'var(--text-faint)'},
     {label: 'Sensitive columns', value: fmtInt(o.sensitive_columns_count), iconName: 'shield', color: o.sensitive_columns_count > 0 ? 'var(--violet)' : 'var(--text-faint)', link: o.sensitive_columns_count > 0 ? 'sensitive' : null},
-    {label: 'Alerts', value: fmtInt(alertCount), iconName: 'warning', color: alertCount > 0 ? 'var(--amber)' : 'var(--text-faint)', link: alertCount > 0 ? 'alerts' : null},
-    {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '\u2014' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
+    {label: m.engine === 'bigquery' ? 'Storage' : 'Memory', value: (m.memory_mb === null || m.memory_mb === undefined) ? '—' : m.memory_mb + ' MB', iconName: 'memory', color: 'var(--text-muted)'},
   ];
-  const html = tiles.map((t,i) => {
-    const link = t.link && KPI_LINKS[t.link];
-    const inner =
-      '<div class="kpi-icon-badge" style="--badge-color:' + t.color + ';--badge-bg:' + softBg(t.color) + '">' + icon(t.iconName, 'xl', null, true) + '</div>' +
-      '<div class="kpi-value">' + esc(t.value) + '</div>' +
-      '<div class="kpi-label">' + esc(t.label) + '</div>' +
-      (t.bar !== undefined ? '<div class="kpi-bar"><span style="width:' + t.bar + '%; background:' + t.barColor + '"></span></div>' : '');
-    if (!link) return '<div class="kpi-card" style="--i:' + (i+1) + '">' + inner + '</div>';
-    return '<button type="button" class="kpi-card kpi-link" style="--i:' + (i+1) + '" data-kpi-link="' + t.link + '" title="' + esc(link.hint) + '">' +
-      '<span class="kpi-link-arrow">' + icon('arrow_downward', 'sm') + '</span>' + inner + '</button>';
-  }).join('');
   const grid = document.getElementById('kpi-grid');
-  grid.insertAdjacentHTML('beforeend', html);
-  grid.querySelectorAll('[data-kpi-link]').forEach(btn => btn.addEventListener('click', () => KPI_LINKS[btn.dataset.kpiLink].go()));
+  grid.innerHTML = tiles.map(kpiTile).join('');
+  wireKpiLinks(grid);
+}
+
+const SEVERITY_ORDER = {high:0, sensitive:1, warning:2, info:3};
+function sortAlerts(alerts) {
+  const rank = a => SEVERITY_ORDER[a.severity] === undefined ? 9 : SEVERITY_ORDER[a.severity];
+  return alerts.slice().sort((a,b) => rank(a) - rank(b));
+}
+function alertRows(alerts, emptyMsg) {
+  if (!alerts.length) return '<div class="alert-empty">' + icon('check_circle','sm') + ' ' + esc(emptyMsg) + '</div>';
+  return '<div class="alert-list">' + sortAlerts(alerts).map(a =>
+    '<div class="alert-row" style="--sev-color:' + (SEVERITY_COLOR[a.severity] || 'var(--border)') + '">' +
+      '<span class="alert-glyph">' + icon(SEVERITY_ICON[a.severity] || 'info', 'sm') + '</span>' +
+      '<span class="alert-msg">' + (a.column ? '<button type="button" class="alert-col-link" data-open-col="' + esc(a.column) + '" title="Open column details">' + esc(a.column) + '</button> — ' : '') + esc(a.message) + '</span>' +
+    '</div>').join('') + '</div>';
+}
+function scopeBlock(tagIcon, tagLabel, desc, tiles, alerts, emptyMsg) {
+  return '<div class="dq-scope-head"><span class="scope-tag">' + icon(tagIcon, 'sm') + esc(tagLabel) + '</span><span class="scope-desc">' + esc(desc) + '</span></div>' +
+    '<div class="dq-tiles">' + tiles.map(kpiTile).join('') + '</div>' +
+    '<div class="dq-alerts-head">' + icon('warning', 'sm') + 'Alerts <span class="count">' + alerts.length + '</span></div>' +
+    alertRows(alerts, emptyMsg);
+}
+
+// Table-level vs column-level is decided by the alert itself: alerts tied
+// to one column carry its name, everything else (duplicate rows, identical
+// column pairs, correlations, dependencies, skipped columns) has none.
+function renderQuality() {
+  const m = PROFILE.meta, o = PROFILE.overview, cols = PROFILE.columns || [];
+  const alerts = o.alerts || [];
+  const tableAlerts = alerts.filter(a => !a.column);
+  const columnAlerts = alerts.filter(a => a.column);
+
+  const completeness = Math.max(0, 100 - o.total_missing_pct);
+  const completenessColor = completeness > 90 ? 'var(--green)' : completeness > 70 ? 'var(--amber)' : 'var(--coral)';
+  const totalCells = (m.n_rows || 0) * cols.length;
+  const dupMeasured = m.duplicate_rows !== null && m.duplicate_rows !== undefined;
+  const tableTiles = [
+    {label: 'Completeness', value: cols.length ? fmtPct(completeness) : '—', sub: totalCells ? fmtInt(totalCells - o.total_missing_cells) + ' of ' + fmtInt(totalCells) + ' cells filled' : 'no cells',
+     bar: totalCells ? completeness : undefined, barColor: completenessColor, iconName: 'task_alt', color: completenessColor},
+    {label: 'Duplicate rows', value: dupMeasured ? fmtInt(m.duplicate_rows) : 'Not measured',
+     sub: dupMeasured ? (m.duplicate_rows ? fmtPct(m.duplicate_rows_pct) + ' of rows are exact copies' : 'no exact copies') : 'not computed by this engine',
+     iconName: 'content_copy', color: !dupMeasured ? 'var(--text-faint)' : m.duplicate_rows > 0 ? 'var(--amber)' : 'var(--green)'},
+  ];
+
+  const withMissing = cols.filter(c => c.missing > 0).length;
+  const constant = cols.filter(c => c.semantic_type === 'constant').length;
+  const columnTiles = [
+    {label: 'Columns with missing values', value: fmtInt(withMissing) + ' / ' + fmtInt(cols.length), sub: withMissing ? 'click to sort by missing %' : cols.length ? 'every column fully populated' : 'no columns',
+     iconName: 'help', color: withMissing ? 'var(--amber)' : 'var(--green)', link: withMissing ? 'missing' : null},
+    {label: 'Constant columns', value: fmtInt(constant), sub: constant ? 'single distinct value' : cols.length ? 'none' : 'no columns',
+     iconName: 'block', color: constant ? 'var(--amber)' : 'var(--green)', link: constant ? 'constant' : null},
+  ];
+
+  const tableEl = document.getElementById('dq-table');
+  const colEl = document.getElementById('dq-column');
+  tableEl.innerHTML = scopeBlock('table', 'Table level', 'The dataset as a whole and relationships between columns', tableTiles, tableAlerts, 'No table-level alerts.');
+  colEl.innerHTML = scopeBlock('view_column', 'Column level', 'Individual columns — click a name for details', columnTiles, columnAlerts, 'No column-level alerts.');
+  [tableEl, colEl].forEach(el => {
+    wireKpiLinks(el);
+    el.querySelectorAll('[data-open-col]').forEach(btn => btn.addEventListener('click', () => openDetail(btn.dataset.openCol)));
+  });
 }
 
 // Each KPI link puts the target section into the view that explains the
 // number, then scrolls to it.
 const KPI_LINKS = {
-  columns:   {hint: 'Show all columns',                   go: () => { setColumnView({}); jumpTo('columns-section'); }},
-  missing:   {hint: 'Show columns sorted by missing %',   go: () => { setColumnView({sort: 'missing'}); jumpTo('columns-section'); }},
-  sensitive: {hint: 'Show only sensitive columns',        go: () => { setColumnView({sensitiveOnly: true}); jumpTo('columns-section'); }},
-  alerts:    {hint: 'Jump to alerts',                     go: () => jumpTo('alerts-panel')},
+  columns:   {hint: 'Show all columns',                 go: () => { setColumnView({}); jumpTo('columns-section'); }},
+  missing:   {hint: 'Show columns sorted by missing %', go: () => { setColumnView({sort: 'missing'}); jumpTo('columns-section'); }},
+  constant:  {hint: 'Show only constant columns',       go: () => { setColumnView({types: ['constant']}); jumpTo('columns-section'); }},
+  sensitive: {hint: 'Show only sensitive columns',      go: () => { setColumnView({sensitiveOnly: true}); jumpTo('columns-section'); }},
 };
 
 function setColumnView(opts) {
   state.search = '';
   document.getElementById('search-input').value = '';
-  state.typeFilters.clear();
-  document.querySelectorAll('[data-filter-type]').forEach(b => b.classList.remove('active'));
+  state.typeFilters = new Set(opts.types || []);
+  document.querySelectorAll('[data-filter-type]').forEach(b => b.classList.toggle('active', state.typeFilters.has(b.dataset.filterType)));
   state.sensitiveOnly = !!opts.sensitiveOnly;
   const sensBtn = document.querySelector('[data-filter-sensitive]');
   if (sensBtn) { sensBtn.classList.toggle('active', state.sensitiveOnly); sensBtn.setAttribute('aria-pressed', String(state.sensitiveOnly)); }
@@ -588,21 +642,6 @@ function jumpTo(id) {
   el.classList.add('flash');
 }
 
-function renderAlerts() {
-  const panel = document.getElementById('alerts-panel');
-  const alerts = PROFILE.overview.alerts || [];
-  const titleIcon = icon('warning', null);
-  if (!alerts.length) { panel.innerHTML = '<div class="panel-title">' + titleIcon + 'Alerts</div><div class="alert-empty">' + icon('check_circle','sm') + ' No alerts \u2014 nothing stood out.</div>'; return; }
-  const order = {high:0, sensitive:1, warning:2, info:3};
-  const sorted = alerts.slice().sort((a,b) => (order[a.severity] === undefined ? 9 : order[a.severity]) - (order[b.severity] === undefined ? 9 : order[b.severity]));
-  const rows = sorted.map(a =>
-    '<div class="alert-row" style="--sev-color:' + (SEVERITY_COLOR[a.severity] || 'var(--border)') + '">' +
-      '<span class="alert-glyph">' + icon(SEVERITY_ICON[a.severity] || 'info', 'sm') + '</span>' +
-      '<span class="alert-msg">' + (a.column ? '<span class="alert-col">' + esc(a.column) + '</span> \u2014 ' : '') + esc(a.message) + '</span>' +
-    '</div>'
-  ).join('');
-  panel.innerHTML = '<div class="panel-title">' + titleIcon + 'Alerts <span class="panel-sub">' + alerts.length + '</span></div><div class="alert-list">' + rows + '</div>';
-}
 
 function renderTypeDistribution() {
   const dist = PROFILE.overview.type_distribution || {};
@@ -860,7 +899,7 @@ document.getElementById('back-btn').addEventListener('click', showDashboard);
 
 renderHeader();
 renderHero();
-renderAlerts();
+renderQuality();
 renderTypeDistribution();
 renderCorrelation();
 renderMissingCorr();

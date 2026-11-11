@@ -81,6 +81,7 @@ df = pd.concat([df, dupe_rows], ignore_index=True)
 if __name__ == "__main__":
     result = profile(df, output_html="example_report.html", source_name="customers_demo.csv")
     print(f"Rows: {result['meta']['n_rows']}, Columns: {result['meta']['n_cols']}")
-    print(f"Quality score: {result['overview']['quality_score']}")
+    print(f"Completeness: {100 - result['overview']['total_missing_pct']:.1f}%, "
+          f"duplicate rows: {result['meta']['duplicate_rows']}")
     print(f"Sensitive columns flagged: {result['overview']['sensitive_columns_count']}")
     print("-> example_report.html")

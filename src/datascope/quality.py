@@ -1,6 +1,5 @@
 """
-Data-quality rule recommendations, dbt-style test snippets, and a
-composite quality score. Every recommendation here is a heuristic
+Data-quality rule recommendations and dbt-style test snippets. Every recommendation here is a heuristic
 starting point derived from the observed sample — review before
 enforcing anything in production, especially accepted-value lists
 learned from a single snapshot of the data.
@@ -109,22 +108,3 @@ def generate_dbt_snippet(col: Dict[str, Any]) -> Optional[str]:
                 lines.append(f"        {k}: {v!r}")
     return "\n".join(lines)
 
-
-def compute_quality_score(profile: Dict[str, Any]) -> Optional[float]:
-    """A simple, explainable 0-100 composite: completeness, duplicate-row
-    penalty, and structural cleanliness (share of non-constant columns).
-    Shown in the report with its components broken out, not just the
-    number, since a single opaque score is more misleading than useful."""
-    cols = profile["columns"]
-    meta = profile["meta"]
-    if not cols or meta["n_rows"] == 0:
-        return None
-
-    completeness = 1 - profile["overview"]["total_missing_pct"] / 100
-    # duplicate_rows_pct is None when the engine didn't measure it (BigQuery).
-    dup_score = 1 - min((meta.get("duplicate_rows_pct") or 0.0) / 100, 1.0)
-    constant_cols = sum(1 for c in cols if c["semantic_type"] == "constant")
-    structure_score = 1 - (constant_cols / len(cols))
-
-    score = (completeness * 0.45 + dup_score * 0.25 + structure_score * 0.30) * 100
-    return round(max(0.0, min(100.0, score)), 1)

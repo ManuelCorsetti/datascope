@@ -18,7 +18,7 @@ from .stats import (
 )
 from .semantic import infer_semantic_type
 from .pii import detect_sensitive_data, mask_value
-from .quality import recommend_rules, generate_dbt_snippet, compute_quality_score
+from .quality import recommend_rules, generate_dbt_snippet
 from .relationships import find_functional_dependencies
 from .html_report import render_html
 
@@ -129,7 +129,6 @@ class DataProfiler:
         result["overview"]["alerts"] = self._build_alerts(column_profiles, duplicate_rows, n_rows,
                                                             high_correlation_pairs, duplicate_columns,
                                                             functional_dependencies)
-        result["overview"]["quality_score"] = compute_quality_score(result)
         return result
 
     # -------------------------------------------------------- per column

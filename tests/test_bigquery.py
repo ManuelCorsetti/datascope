@@ -181,7 +181,6 @@ class TestProfileShape:
         assert any(r["type"] == "non_negative_check" for r in amount["quality_rules"])
         assert any(a["column"] == "amount" for a in result["overview"]["alerts"])
         assert result["overview"]["total_missing_cells"] == 600
-        assert 0 < result["overview"]["quality_score"] <= 100
         json.dumps(_sanitize(result))  # must not raise
 
     def test_column_subset_is_case_insensitive_and_validated(self, canned):
@@ -436,7 +435,6 @@ class TestExecutedAgainstRealData:
         result = profile_bigquery("demo.shop.empty", client=client, output_html=str(tmp_path / "empty.html"))
         assert result["meta"]["n_rows"] == 0
         assert {c["semantic_type"] for c in result["columns"]} == {"empty"}
-        assert result["overview"]["quality_score"] is None
 
     def test_unsupported_column_is_skipped_and_the_rest_profiled(self, warehouse):
         client, _ = warehouse

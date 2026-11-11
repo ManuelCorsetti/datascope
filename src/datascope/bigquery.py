@@ -40,7 +40,7 @@ import pandas as pd
 from .core import DataProfiler
 from .html_report import render_html
 from .pii import detect_sensitive_data, mask_value
-from .quality import compute_quality_score, generate_dbt_snippet, recommend_rules
+from .quality import generate_dbt_snippet, recommend_rules
 from .semantic import infer_semantic_type_from_summary
 from .stats import _safe_float
 
@@ -467,7 +467,6 @@ class BigQueryProfiler:
         alerts = [{"severity": "warning", "column": None, "message": _skip_message(sk["name"], sk["dtype"])}
                   for sk in skipped]
         result["overview"]["alerts"] = alerts + DataProfiler()._build_alerts(column_profiles, 0, n_rows)
-        result["overview"]["quality_score"] = compute_quality_score(result)
         return result
 
     def to_html(self, profile_dict: Dict[str, Any], output_path: str) -> str:
