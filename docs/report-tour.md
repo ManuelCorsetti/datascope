@@ -112,7 +112,7 @@ For each flagged column the panel shows **what it looks like**, **why** it was f
 
 > *Its name suggests it holds an email address. 100% of 1,000 sampled values have the format of an email address.*
 
-Values from flagged columns are **masked wherever the report lists them**: top values, example values and so on (`j***@***.com`). Summary statistics, such as a date column's earliest and latest date, are still shown.
+Values from flagged columns are **masked wherever the report lists them**: top values, example values and so on (`j***@***.com`). Their minimum, maximum, quartiles and earliest / latest date are left out too, since each of those is a real value from one row; averages, counts and the length of a date range are still shown.
 
 > [!IMPORTANT]
 > This is pattern matching to point you at columns worth a review, **not** a compliance decision. A column it misses isn't masked. On BigQuery, only column **names** are checked. [How detection works](checks.md#-personal--sensitive-data).
@@ -236,4 +236,5 @@ Then two **copyable commands**: one that **extends** the run with every suggeste
 - 🖱️ **Everything with a ↓ or a blue name is clickable**: tiles, alert column names, reference checks.
 - 🔎 **Hover** over heatmap cells, chart bars and dependency rows for exact numbers.
 - 📤 **Sharing?** The report is one file. Check the [personal data panel](#-personal--sensitive-data) first.
-- 🌐 **Offline?** The report works offline, but its fonts and icons come from Google Fonts. Without them, text falls back to your system font and icons show as words.
+- 🌐 **Offline?** Works the same: fonts and icons are built into the file, and it makes no network requests.
+- 🧩 **Blank page?** The report is drawn by JavaScript built into the file. Email, SharePoint and Teams previews don't run it and show a note saying so: save the file and open it in a browser. There's nothing to install or allow.

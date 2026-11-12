@@ -52,15 +52,17 @@ def recommend_rules(col: Dict[str, Any]) -> List[Dict[str, Any]]:
     if ns and ns.get("infinite_count"):
         rules.append({"type": "infinite_value_check", "severity": "warning",
                        "description": f"{ns['infinite_count']} infinite value(s) found — likely an upstream division-by-zero or overflow bug."})
-    if ns and ns.get("min") is not None:
+    # min/max are None for a flagged personal-data column (masked: each is a
+    # real value), so it gets no range rule; the count-based rules still apply.
+    if ns and ns.get("min") is not None and ns.get("max") is not None:
         rules.append({"type": "range_check", "severity": "suggested",
                        "description": f"Observed range is {ns['min']} to {ns['max']} — consider a bounds check."})
-        if ns.get("outlier_pct", 0) > 1:
-            rules.append({"type": "outlier_review", "severity": "info",
-                           "description": f"{ns['outlier_pct']}% of values sit outside 1.5x IQR — review before treating as errors."})
-        if ns.get("negatives", 0) > 0 and _name_implies_nonnegative(name):
-            rules.append({"type": "non_negative_check", "severity": "warning",
-                           "description": f"Column name suggests non-negative values, but {ns['negatives']} negative value(s) found."})
+    if ns and ns.get("outlier_pct", 0) > 1:
+        rules.append({"type": "outlier_review", "severity": "info",
+                       "description": f"{ns['outlier_pct']}% of values sit outside 1.5x IQR — review before treating as errors."})
+    if ns and ns.get("negatives", 0) > 0 and _name_implies_nonnegative(name):
+        rules.append({"type": "non_negative_check", "severity": "warning",
+                       "description": f"Column name suggests non-negative values, but {ns['negatives']} negative value(s) found."})
 
     ds = col.get("datetime_stats")
     if ds and ds.get("future_dates", 0) > 0:
@@ -96,7 +98,7 @@ def generate_dbt_snippet(col: Dict[str, Any]) -> Optional[str]:
         if coverage >= 99:
             tests.append({"accepted_values": {"values": [tv["value"] for tv in col["top_values"]]}})
     ns = col.get("numeric_stats")
-    if ns and ns.get("min") is not None and not col["sensitive"]["is_sensitive"]:
+    if ns and ns.get("min") is not None and ns.get("max") is not None and not col["sensitive"]["is_sensitive"]:
         tests.append({"dbt_utils.accepted_range": {"min_value": ns["min"], "max_value": ns["max"]}})
 
     if not tests:

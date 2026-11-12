@@ -44,7 +44,7 @@ import pandas as pd
 
 from .core import DataProfiler, _version
 from .html_report import render_html
-from .pii import detect_sensitive_data, mask_value
+from .pii import detect_sensitive_data, mask_column_profile
 from .quality import generate_dbt_snippet, recommend_rules
 from .referential import (alerts_for, build_result, keep_suggestion, name_suggests_reference, suggestion_entry,
                           suggestion_pairs)
@@ -1033,7 +1033,7 @@ class BigQueryProfiler:
         sensitive = detect_sensitive_data(pd.Series([], dtype=object), name, skip_content=True)
         profile["sensitive"] = sensitive
         if sensitive["is_sensitive"]:
-            profile["top_values"] = [{**tv, "value": mask_value(tv["value"])} for tv in top_values]
+            mask_column_profile(profile)
 
         profile["quality_rules"] = recommend_rules(profile)
         profile["dbt_snippet"] = generate_dbt_snippet(profile)

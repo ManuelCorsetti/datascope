@@ -243,11 +243,11 @@ result
 | `semantic_type`, `semantic_type_confidence`, `semantic_notes` | [What the column means](checks.md#-semantic-types), how sure, and why |
 | `count`, `missing`, `missing_pct`, `unique`, `unique_pct` | `count` is all rows; `unique_pct` is of non-empty values |
 | `memory_bytes` | Size in memory (pandas) |
-| `numeric_stats` | `mean, std, min, q1, median, q3, max, range, sum, zeros, zeros_pct, negatives, negatives_pct, skewness, kurtosis, outlier_count, outlier_pct, lower_fence, upper_fence, is_integer_like, infinite_count` (some are pandas only) |
+| `numeric_stats` | `mean, std, min, q1, median, q3, max, range, sum, zeros, zeros_pct, negatives, negatives_pct, skewness, kurtosis, outlier_count, outlier_pct, lower_fence, upper_fence, is_integer_like, infinite_count` (some are pandas only). For a column flagged as personal data, `min`, `q1`, `median`, `q3`, `max` and the fences are `None` |
 | `string_stats` | `min_length, max_length, mean_length, empty_or_whitespace` |
-| `datetime_stats` | `min_date, max_date, range_days, weekday_distribution, future_dates` |
+| `datetime_stats` | `min_date, max_date, range_days, weekday_distribution, future_dates` (`min_date` / `max_date` are `None` for a personal-data column) |
 | `boolean_stats` | `true_count, false_count, true_pct` |
-| `histogram`, `length_histogram` | `{edges, counts}` (pandas) |
+| `histogram`, `length_histogram` | `{edges, counts}` (pandas; `histogram` is `None` for a personal-data column) |
 | `top_values` | `[{value, count, pct}]`, masked for personal data |
 | `sensitive` | `is_sensitive, category (PII/PHI/PCI), category_label, type, type_label, confidence, detected_by, reasons` |
 | `quality_rules` | `[{type, severity, description, ...}]`, see [quality rules](checks.md#-quality-rules--dbt-tests) |

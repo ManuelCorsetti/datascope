@@ -262,6 +262,33 @@ def _reasons(category: str, by: Any, content: Any) -> List[str]:
     return reasons
 
 
+# Order statistics are values from individual rows (the minimum of an SSN
+# column is somebody's SSN; the IQR fences give back q1 and q3), so a
+# flagged column doesn't keep them. Aggregates such as mean, sum, range and
+# counts describe no single row and stay.
+_NUMERIC_ORDER_STATS = ("min", "q1", "median", "q3", "max", "lower_fence", "upper_fence")
+
+
+def mask_column_profile(profile: Dict[str, Any]) -> None:
+    """Hide a flagged column's row-level values, in place: mask its top
+    values and drop its order statistics, its numeric histogram (whose
+    outer edges are the min and max) and its earliest / latest date. Call
+    it before deriving quality rules or dbt tests from the profile."""
+    profile["top_values"] = [{**tv, "value": mask_value(tv["value"])} for tv in profile.get("top_values") or []]
+    ns = profile.get("numeric_stats")
+    if ns:
+        for key in _NUMERIC_ORDER_STATS:
+            if key in ns:
+                ns[key] = None
+    if profile.get("histogram"):
+        profile["histogram"] = None
+    ds = profile.get("datetime_stats")
+    if ds:
+        for key in ("min_date", "max_date"):
+            if key in ds:
+                ds[key] = None
+
+
 def mask_value(value: Any) -> str:
     """Mask a single value for safe display in the report. Email-aware,
     otherwise shows only the first/last character."""

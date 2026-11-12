@@ -17,7 +17,7 @@ from .stats import (
     compute_boolean_stats, compute_histogram, compute_length_histogram, compute_top_values,
 )
 from .semantic import infer_semantic_type
-from .pii import detect_sensitive_data, mask_value
+from .pii import detect_sensitive_data, mask_column_profile, mask_value
 from .quality import recommend_rules, generate_dbt_snippet
 from .referential import Reference, alerts_for, find_referential_integrity
 from .relationships import _candidate_pool, find_column_dependencies
@@ -232,7 +232,7 @@ class DataProfiler:
         profile["sensitive"] = sensitive
 
         if sensitive["is_sensitive"]:
-            profile["top_values"] = [{**tv, "value": mask_value(tv["value"])} for tv in profile["top_values"]]
+            mask_column_profile(profile)
 
         profile["quality_rules"] = recommend_rules(profile)
         profile["dbt_snippet"] = generate_dbt_snippet(profile)
