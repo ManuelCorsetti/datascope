@@ -501,6 +501,22 @@ class TestExecutedAgainstRealData:
         assert by_name["email"]["sensitive"]["is_sensitive"]
         assert by_name["email"]["top_values"] == []
 
+    def test_personal_data_columns_keep_no_row_level_values(self, warehouse, tmp_path):
+        client, _ = warehouse
+        client.con.execute("CREATE TABLE demo.shop.people AS SELECT 100000000 + i * 7919 AS ssn, "
+                           "DATE '1950-01-01' + CAST(i * 37 AS INTEGER) AS date_of_birth FROM range(300) r(i)")
+        out = tmp_path / "people.html"
+        result = profile_bigquery("demo.shop.people", client=client, output_html=str(out))
+        cols = {c["name"]: c for c in result["columns"]}
+        assert cols["ssn"]["sensitive"]["is_sensitive"] and cols["date_of_birth"]["sensitive"]["is_sensitive"]
+        assert all(cols["ssn"]["numeric_stats"][k] is None for k in ("min", "q1", "median", "q3", "max"))
+        assert cols["ssn"]["numeric_stats"]["mean"] is not None
+        assert cols["date_of_birth"]["datetime_stats"]["min_date"] is None
+        assert cols["date_of_birth"]["datetime_stats"]["max_date"] is None
+        html = out.read_text(encoding="utf-8")
+        assert "100000000" not in html and str(100000000 + 299 * 7919) not in html
+        assert "1950-01-01" not in html
+
     def test_correlations_agree_with_pandas_engine(self, warehouse):
         client, _ = warehouse
         rng = np.random.default_rng(3)

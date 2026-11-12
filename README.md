@@ -206,7 +206,7 @@ Both engines produce the **same profile dict**, so the report, the alerts and th
 <summary><b>Does my data leave my machine?</b></summary>
 <br>
 
-No. The pandas engine works entirely in memory on your machine. The BigQuery engine runs SQL **inside BigQuery** and only brings back aggregates, never rows. The report file contains statistics plus a handful of example values (top values, examples of broken references). Values from columns flagged as personal data are masked wherever the report lists them. The report loads Google Fonts for its typefaces and icons; nothing about your data is sent.
+No. The pandas engine works entirely in memory on your machine. The BigQuery engine runs SQL **inside BigQuery** and only brings back aggregates, never rows. The report file contains statistics plus a handful of example values (top values, examples of broken references). Values from columns flagged as personal data are masked wherever the report lists them. The report makes no network requests at all: its fonts and icons are built into the file, and a Content-Security-Policy in it blocks any connection.
 
 </details>
 
@@ -214,7 +214,7 @@ No. The pandas engine works entirely in memory on your machine. The BigQuery eng
 <summary><b>Is the report safe to share?</b></summary>
 <br>
 
-It's designed to be: no raw rows, and listed values from personal-data columns are masked (e.g. `j***@***.com`). Two caveats. Detection is pattern matching, so a column it misses isn't masked. And summary statistics, such as the earliest and latest value of a date column, are still shown. Skim the [Personal & sensitive data](docs/report-tour.md#-personal--sensitive-data) panel before sharing widely.
+It's designed to be: no raw rows, and listed values from personal-data columns are masked (e.g. `j***@***.com`). A flagged column's minimum, maximum, quartiles and earliest / latest date are left out too, since each is a real value; averages and counts stay. The caveat: detection is pattern matching, so a column it misses isn't masked. Skim the [Personal & sensitive data](docs/report-tour.md#-personal--sensitive-data) panel before sharing widely.
 
 </details>
 

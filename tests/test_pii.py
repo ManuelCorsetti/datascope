@@ -1,3 +1,6 @@
+import re
+
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -197,3 +200,37 @@ def test_dependency_exceptions_are_masked_for_personal_data_columns():
     [example] = dep["violation_examples"]
     assert example["determinant_value"] != "Leader Number2" and example["determinant_value"].startswith("L")
     assert example["dependent_value"] == "team_4"  # not a personal-data column: shown as is
+
+
+def test_personal_data_columns_keep_no_row_level_values(tmp_path):
+    """min / max / quartiles / histogram edges / earliest-latest date are
+    each a real row's value (the minimum of an SSN column is somebody's
+    SSN), so a flagged column keeps none of them, in the profile, its
+    quality rules or the rendered report."""
+    from datascope import DataProfiler
+    from datascope.html_report import render_html
+    rng = np.random.default_rng(1)
+    n = 200
+    ssn = rng.integers(100_000_000, 999_999_999, n)
+    dob = pd.Timestamp("1950-01-01") + pd.to_timedelta(rng.integers(0, 20_000, n), unit="D")
+    df = pd.DataFrame({"ssn": ssn, "date_of_birth": dob, "amount": rng.normal(100, 5, n)})
+    result = DataProfiler().profile(df)
+    cols = {c["name"]: c for c in result["columns"]}
+
+    s = cols["ssn"]
+    assert s["sensitive"]["is_sensitive"]
+    assert all(s["numeric_stats"][k] is None for k in ("min", "q1", "median", "q3", "max", "lower_fence", "upper_fence"))
+    assert s["histogram"] is None
+    assert s["numeric_stats"]["mean"] is not None  # aggregates stay
+    assert not any(r["type"] == "range_check" for r in s["quality_rules"])
+    d = cols["date_of_birth"]
+    assert d["datetime_stats"]["min_date"] is None and d["datetime_stats"]["max_date"] is None
+    assert d["datetime_stats"]["range_days"] > 0
+    # an unflagged column is untouched
+    assert cols["amount"]["numeric_stats"]["min"] is not None and cols["amount"]["histogram"]
+
+    out = tmp_path / "r.html"
+    render_html(result, str(out))
+    html = out.read_text(encoding="utf-8")
+    assert not [v for v in map(str, ssn) if re.search(r"(?<![\d.])" + v + r"(?!\d)", html)]
+    assert dob.min().date().isoformat() not in html and dob.max().date().isoformat() not in html
